@@ -91,6 +91,75 @@ def test_global_error_is_protocol_failure_with_http_200(
 
 
 @pytest.mark.parametrize(
+    "ignored_configuration",
+    [
+        {"default": {"type": "success", "price": -1, "currency": "invalid"}},
+        {"results": {"12": {"type": "error", "code": "invalid", "message": ""}}},
+    ],
+)
+def test_valid_global_error_ignores_malformed_item_configuration(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    minimal_payload: dict[str, object],
+    ignored_configuration: dict[str, object],
+) -> None:
+    payload = deepcopy(minimal_payload)
+    payload["options"] = {
+        "stub": {
+            **ignored_configuration,
+            "global_error": {"code": "COLLECTOR_ERROR", "message": "Requested failure"},
+        }
+    }
+
+    response = post(client, auth_headers, payload)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema_version": "1.0",
+        "request_id": "request-1",
+        "success": False,
+        "items": [],
+        "error": {"code": "COLLECTOR_ERROR", "message": "Requested failure"},
+    }
+
+
+def test_malformed_global_error_is_controlled_configuration_failure(
+    client: TestClient, auth_headers: dict[str, str], minimal_payload: dict[str, object]
+) -> None:
+    payload = deepcopy(minimal_payload)
+    payload["options"] = {
+        "stub": {
+            "global_error": {"code": "invalid", "message": ""},
+            "default": {"type": "success", "price": "1", "currency": "RUB"},
+        }
+    }
+
+    response = post(client, auth_headers, payload)
+
+    assert response.status_code == 200
+    assert response.json()["error"] == {
+        "code": "STUB_CONFIGURATION_ERROR",
+        "message": "Stub collector configuration is missing or invalid.",
+    }
+
+
+def test_global_error_does_not_allow_unexpected_stub_fields(
+    client: TestClient, auth_headers: dict[str, str], minimal_payload: dict[str, object]
+) -> None:
+    payload = deepcopy(minimal_payload)
+    payload["options"] = {
+        "stub": {
+            "global_error": {"code": "COLLECTOR_ERROR", "message": "Requested failure"},
+            "unexpected": True,
+        }
+    }
+
+    response = post(client, auth_headers, payload)
+
+    assert response.json()["error"]["code"] == "STUB_CONFIGURATION_ERROR"
+
+
+@pytest.mark.parametrize(
     "stub",
     [
         None,

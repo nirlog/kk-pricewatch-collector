@@ -35,10 +35,9 @@ class StubError(StrictModel):
 StubResult = Annotated[StubSuccess | StubError, Field(discriminator="type")]
 
 
-class StubConfiguration(StrictModel):
+class StubItemConfiguration(StrictModel):
     default: StubResult | None = None
     results: dict[str, StubResult] = Field(default_factory=dict)
-    global_error: CollectorError | None = None
 
 
 class StubCollector:
@@ -50,14 +49,25 @@ class StubCollector:
     )
 
     def collect(self, request: CollectorRequest) -> CollectorResponse:
-        try:
-            raw_stub = request.options.get("stub")
-            configuration = StubConfiguration.model_validate(raw_stub)
-        except (ValidationError, TypeError):
+        raw_stub = request.options.get("stub")
+        if not isinstance(raw_stub, dict) or not set(raw_stub).issubset(
+            {"default", "results", "global_error"}
+        ):
             return self._failure(request.request_id, self._configuration_error)
 
-        if configuration.global_error is not None:
-            return self._failure(request.request_id, configuration.global_error)
+        # A valid global error takes precedence over item configuration. Validate it
+        # independently so deliberately malformed default/results values are ignored.
+        if "global_error" in raw_stub:
+            try:
+                global_error = CollectorError.model_validate(raw_stub["global_error"])
+            except (ValidationError, TypeError):
+                return self._failure(request.request_id, self._configuration_error)
+            return self._failure(request.request_id, global_error)
+
+        try:
+            configuration = StubItemConfiguration.model_validate(raw_stub)
+        except (ValidationError, TypeError):
+            return self._failure(request.request_id, self._configuration_error)
 
         results: list[SuccessfulItem | FailedItem] = []
         for item in request.items:
