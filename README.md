@@ -1,0 +1,1 @@
+# kk-pricewatch-collector
