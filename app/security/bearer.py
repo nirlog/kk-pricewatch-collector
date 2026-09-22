@@ -17,7 +17,9 @@ def authenticate_bearer(
 
     scheme, separator, supplied_token = (authorization or "").partition(" ")
     valid_shape = bool(separator and scheme.lower() == "bearer" and supplied_token)
-    valid_token = valid_shape and hmac.compare_digest(supplied_token, settings.api_token)
+    valid_token = valid_shape and hmac.compare_digest(
+        supplied_token, settings.authentication_token()
+    )
     if not valid_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

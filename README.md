@@ -1,75 +1,132 @@
 # kk-pricewatch-collector
 
-Standalone Python collection service for the [`nirlog/kk.pricewatch`](https://github.com/nirlog/kk.pricewatch)
-Bitrix module. The HTTP collector protocol `1.0` is the only integration boundary; this
-service does not import Bitrix code or access its database/filesystem.
+Standalone Python collection service for [`nirlog/kk.pricewatch`](https://github.com/nirlog/kk.pricewatch).
+Its only integration boundary is HTTP collector protocol `1.0`; it imports no Bitrix
+code and shares no database or filesystem with Bitrix.
 
-Version **0.1.0** implements a deterministic protocol-compatible stub. It performs no
-real scraping, browser automation, or outbound HTTP requests.
+Version **0.2.0** adds a Windows production-service runtime around the unchanged,
+deterministic protocol stub. It performs no real scraping, browser automation, or
+competitor network requests.
 
-## Requirements and local setup
+## Local development
 
-- Python 3.12+
+Requires Python 3.12+:
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[dev]'
 export KK_PRICEWATCH_API_TOKEN='local-test-token'
-uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000
+python -m pytest
 ```
 
-Settings use the `KK_PRICEWATCH_` environment prefix. `KK_PRICEWATCH_API_TOKEN` is
-required and must be non-empty. The application does not automatically load `.env`;
-export variables explicitly or use your process/container secret mechanism. The token
-belongs only in the `Authorization: Bearer ...` header—never in URLs or JSON.
+Exactly one token source is required. `KK_PRICEWATCH_API_TOKEN` remains convenient for
+local/container use. `KK_PRICEWATCH_API_TOKEN_FILE` points to a UTF-8 file and is the
+recommended production mechanism. The application does not load `.env` automatically.
+Never put the token in a URL or protocol JSON.
 
-## Windows Server development and runtime
+## Manual foreground run
 
-The target production runtime is a dedicated Windows Server/VDS with Python 3.12+ and
-Uvicorn serving FastAPI. From Command Prompt:
-
-```bat
-py -3.12 -m venv .venv
-.venv\Scripts\activate
-python -m pip install .
-set KK_PRICEWATCH_API_TOKEN=replace-with-runtime-secret
+```bash
 uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-From PowerShell, activate the environment and set the token with PowerShell syntax:
+`GET /health` is public and returns exactly `{"status":"ok"}`. The existing
+`POST /api/collectors/browser` endpoint still requires `Authorization: Bearer <token>`.
+The stub's request/response contract and options are documented in
+[`docs/tasks/001-protocol-compatible-stub.md`](docs/tasks/001-protocol-compatible-stub.md).
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install .
-$env:KK_PRICEWATCH_API_TOKEN="replace-with-runtime-secret"
-uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
-```
+## Windows production service
 
-Keep Uvicorn bound to loopback in the production-shaped deployment. Terminate public
-HTTPS at a Windows reverse proxy/TLS endpoint and proxy requests locally to
-`http://127.0.0.1:8000`:
+Production uses this fixed boundary:
 
 ```text
-Bitrix server
-    -> HTTPS
-Windows reverse proxy / TLS endpoint
-    -> http://127.0.0.1:8000
-Uvicorn / FastAPI
+Bitrix -> public HTTPS -> Caddy -> http://127.0.0.1:8000 -> Uvicorn/FastAPI
 ```
 
-The reverse proxy and TLS configuration are deployment concerns and are intentionally
-not implemented by this application. Later tasks may install Selenium and Chrome on the
-same Windows server for browser collectors; Task 001 contains no browser dependencies
-or real scraping behavior.
+WinSW runs the Collector automatically as low-privilege LocalService, restarts it after
+failure, and rotates stdout/stderr. Uvicorn is never bound to `0.0.0.0`; do not expose
+port 8000. Neither WinSW nor Caddy binaries are stored/downloaded by this repository.
+The complete layout, prerequisites, commands, ACL model, and operational cautions are
+in [`deploy/windows/README.md`](deploy/windows/README.md).
 
-## Stub protocol
+### Install
 
-All examples are sent to `POST /api/collectors/browser` with `Content-Type:
-application/json` and an Authorization bearer token.
+Clone an explicit release into `C:\Services\kk-pricewatch-collector`, open elevated
+PowerShell, and provide the path to an operator-downloaded WinSW binary:
 
-Default success:
+```powershell
+.\deploy\windows\Install-CollectorService.ps1 -WinSWPath 'C:\Installers\WinSW-x64.exe'
+```
+
+The script creates the virtual environment and protected ProgramData directories,
+securely prompts for a token when needed, installs and starts the automatic service,
+and reports success only after checking `http://127.0.0.1:8000/health`.
+
+### Status
+
+```powershell
+.\deploy\windows\Get-CollectorStatus.ps1
+```
+
+This displays installation/state/startup/health information, never token metadata.
+
+### Update and rollback
+
+Always provide an immutable release tag or commit explicitly:
+
+```powershell
+.\deploy\windows\Update-Collector.ps1 -Ref 'v0.2.0'
+```
+
+A dirty tree is rejected. The updater records the old SHA, installs and smoke-checks
+the requested ref, starts it, and verifies health. Any failure triggers reinstall,
+restart, and health verification of the recorded SHA. Persistent secrets and logs are
+not touched. See the runbook for exact rollback failure behavior.
+
+### Uninstall
+
+```powershell
+.\deploy\windows\Uninstall-CollectorService.ps1
+```
+
+Normal uninstall retains the repository, token, and logs and prints their location.
+Destructive ProgramData removal requires `-PurgeData` plus explicit confirmation.
+
+### Secret rotation
+
+Securely replace
+`C:\ProgramData\KKPriceWatchCollector\secrets\api-token.txt` without placing its value
+on a command line, preserve/reapply its restricted ACL, then run
+`Restart-Service KKPriceWatchCollector` and verify status. Coordinate the change so the
+Bitrix module and Collector have the same token; these scripts never modify Bitrix.
+
+### Caddy / HTTPS
+
+Use an operator-owned Caddyfile and supplied binaries:
+
+```powershell
+.\deploy\windows\Install-CaddyService.ps1 `
+  -CaddyPath 'C:\Tools\caddy.exe' `
+  -CaddyfilePath 'C:\ProgramData\KKPriceWatchCaddy\Caddyfile' `
+  -WinSWPath 'C:\Installers\WinSW-x64.exe'
+```
+
+The script validates the Caddyfile before installing automatic, restart-on-failure
+`KKPriceWatchCaddy`. A reusable configuration shape is:
+
+```caddyfile
+collector.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+Operators configure the actual hostname, DNS, certificates, inbound 80/443 firewall,
+and separate Caddy access logs. No production hostname is hardcoded in templates.
+
+## Protocol stub example
+
+Send JSON to `POST /api/collectors/browser` with a bearer header:
 
 ```json
 {
@@ -84,48 +141,9 @@ Default success:
 }
 ```
 
-An item error or a mixed batch uses exact item-ID overrides:
-
-```json
-{
-  "schema_version": "1.0",
-  "request_id": "e2e-2",
-  "items": [
-    {"id": "12", "url": "https://competitor.example/p/1"},
-    {"id": "13", "url": "https://competitor.example/p/2"}
-  ],
-  "options": {
-    "stub": {
-      "default": {"type": "success", "price": "12345.67", "currency": "RUB"},
-      "results": {
-        "13": {
-          "type": "error",
-          "code": "PRICE_NOT_FOUND",
-          "message": "Stub price was not found"
-        }
-      }
-    }
-  }
-}
-```
-
-Global protocol error simulation (returned with HTTP 200):
-
-```json
-{
-  "schema_version": "1.0",
-  "request_id": "e2e-3",
-  "items": [{"id": "12", "url": "https://competitor.example/p/1"}],
-  "options": {
-    "stub": {
-      "global_error": {"code": "COLLECTOR_ERROR", "message": "Stub global failure"}
-    }
-  }
-}
-```
-
-Missing or malformed stub configuration produces the safe protocol error
-`STUB_CONFIGURATION_ERROR`, also with HTTP 200.
+Stub options also support deterministic per-item errors and global failures as defined
+by Task 001. Protocol-level global failures still use HTTP 200. No endpoint or protocol
+`1.0` shape changed in Task 002.
 
 ## Quality checks
 
@@ -134,39 +152,16 @@ python -m pytest
 ruff check .
 ruff format --check .
 mypy app
+docker build -t kk-pricewatch-collector:0.2.0 .
 ```
 
-## Docker
+CI additionally parses every PowerShell deployment script on Windows. Docker remains an
+optional portability check, not the primary production runtime. Supply its token only
+at runtime; never bake it into an image.
 
-The image uses Python 3.12, installs runtime dependencies only, and runs as a non-root
-user. Docker is retained as a CI/build-portability check and as an optional runtime; it
-is not the project's primary production deployment model. Supply the secret only at
-runtime:
+## Future browser runtime
 
-```bash
-docker build -t kk-pricewatch-collector:0.1.0 .
-docker run --rm -p 8000:8000 \
-  -e KK_PRICEWATCH_API_TOKEN='local-test-token' \
-  kk-pricewatch-collector:0.1.0
-```
-
-## Bitrix E2E smoke test
-
-With `kk.pricewatch >= 0.17.0`, configure the remote collector through its public HTTPS
-endpoint:
-
-```text
-External Collector base URL: https://collector.example.com
-COLLECTOR_HANDLER: /api/collectors/browser
-Final endpoint: https://collector.example.com/api/collectors/browser
-```
-
-Use the same bearer token in Bitrix and the Collector runtime, then put one of the stub
-objects above in `COLLECTOR_OPTIONS`. Confirm a successful price reaches
-`PriceUpdateService` and monitoring/history, test an item error, and finally test
-recovery to success. No Bitrix-side protocol changes are needed.
-
-Plain HTTP with `http://127.0.0.1:8000` is suitable only when Bitrix and the Collector
-run on the same host. `kk.pricewatch` permits plain HTTP only for loopback destinations;
-a Collector on the dedicated Windows server must therefore be exposed to the Bitrix
-server over HTTPS.
+Task 002 installs no Selenium, Chrome/Chromium, ChromeDriver, Playwright, browser code,
+or interactive desktop session. The Windows layout reserves
+`C:\ProgramData\KKPriceWatchCollector\browser` for a future task without creating or
+using it now.

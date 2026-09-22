@@ -21,3 +21,24 @@ jobs:
       - run: ruff format --check .
       - run: mypy app
       - run: docker build -t kk-pricewatch-collector:test .
+
+  powershell-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell deployment scripts
+        shell: pwsh
+        run: |
+          $errors = @()
+          Get-ChildItem deploy/windows -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $fileErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$tokens, [ref]$fileErrors
+            )
+            $errors += $fileErrors
+          }
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            throw "PowerShell syntax validation failed."
+          }
