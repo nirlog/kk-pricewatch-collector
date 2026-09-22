@@ -3,6 +3,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from app.handlers.stub import StubCollector
 from app.main import create_app
 from app.settings import Settings
 
@@ -11,7 +12,9 @@ TOKEN = "unit-test-token"
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    with TestClient(create_app(Settings(api_token=TOKEN))) as test_client:
+    with TestClient(
+        create_app(Settings(api_token=TOKEN), browser_collector=StubCollector())
+    ) as test_client:
         yield test_client
 
 

@@ -29,6 +29,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install project dependencies
+        shell: pwsh
+        run: python -m pip install -e .
       - name: Parse PowerShell deployment scripts
         shell: pwsh
         run: |
@@ -48,3 +51,9 @@ jobs:
       - name: Exercise Python runtime resolution
         shell: pwsh
         run: ./deploy/windows/Test-CollectorRuntime.ps1 -Python (Get-Command python).Source
+      - name: Execute update import smoke command
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          & $python -c 'from app.main import create_app; assert callable(create_app)'
+          if ($LASTEXITCODE -ne 0) { throw 'Python import smoke failed.' }

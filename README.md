@@ -4,9 +4,8 @@ Standalone Python collection service for [`nirlog/kk.pricewatch`](https://github
 Its only integration boundary is HTTP collector protocol `1.0`; it imports no Bitrix
 code and shares no database or filesystem with Bitrix.
 
-Version **0.3.0** adds an isolated Selenium/Chrome runtime foundation around the
-unchanged deterministic protocol stub. It performs no real scraping or competitor
-network requests.
+Version **0.4.0** adds the first generic Selenium single-price collector. It is not a
+browser-scenario engine and contains no competitor-specific code.
 
 ## Local development
 
@@ -31,17 +30,17 @@ Never put the token in a URL or protocol JSON.
 uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-`GET /health` is public and returns exactly `{"status":"ok"}`. The existing
-`POST /api/collectors/browser` endpoint still requires `Authorization: Bearer <token>`.
-The stub's request/response contract and options are documented in
-[`docs/tasks/001-protocol-compatible-stub.md`](docs/tasks/001-protocol-compatible-stub.md).
+`GET /health` is public and returns exactly `{"status":"ok"}`.
+`POST /api/collectors/browser` requires `Authorization: Bearer <token>` and invokes the
+real `BrowserCollector`. Its strict options are documented in
+[`docs/tasks/004-generic-browser-price-collector.md`](docs/tasks/004-generic-browser-price-collector.md).
 
 ## Windows production service
 
 Production uses this fixed boundary:
 
 ```text
-Bitrix -> HTTPS/Caddy -> FastAPI -> future BrowserCollector (inactive in Task 003)
+Bitrix -> HTTPS/Caddy -> FastAPI -> BrowserCollector
                                -> BrowserSessionFactory -> Selenium -> headless Chrome
 ```
 
@@ -79,7 +78,7 @@ This displays installation/state/startup/health information, never token metadat
 Always provide an immutable release tag or commit explicitly:
 
 ```powershell
-.\deploy\windows\Update-Collector.ps1 -Ref 'v0.3.0'
+.\deploy\windows\Update-Collector.ps1 -Ref 'v0.4.0'
 ```
 
 A dirty tree is rejected. The updater records the old SHA, installs and smoke-checks
@@ -127,7 +126,7 @@ collector.example.com {
 Operators configure the actual hostname, DNS, certificates, inbound 80/443 firewall,
 and separate Caddy access logs. No production hostname is hardcoded in templates.
 
-## Protocol stub example
+## Browser collector example
 
 Send JSON to `POST /api/collectors/browser` with a bearer header:
 
@@ -137,16 +136,26 @@ Send JSON to `POST /api/collectors/browser` with a bearer header:
   "request_id": "e2e-1",
   "items": [{"id": "12", "url": "https://competitor.example/p/1?region=spb"}],
   "options": {
-    "stub": {
-      "default": {"type": "success", "price": "12345.67", "currency": "RUB"}
+    "browser": {
+      "allowed_hosts": ["competitor.example"],
+      "price": {
+        "by": "css",
+        "selector": ".product-price",
+        "source": "text"
+      },
+      "currency": "RUB",
+      "decimal_separator": "comma",
+      "wait_timeout_seconds": 15,
+      "page_load_timeout_seconds": 30
     }
   }
 }
 ```
 
-Stub options also support deterministic per-item errors and global failures as defined
-by Task 001. Protocol-level global failures still use HTTP 200. No endpoint or protocol
-`1.0` shape changed in Task 002.
+The collector supports one CSS or XPath price selector and extracts visible text or a
+configured attribute. It applies an exact-host/public-DNS baseline SSRF policy before
+navigation and checks the final redirect host. This is not complete DNS-rebinding
+protection. Protocol-level failures still use HTTP 200; protocol `1.0` is unchanged.
 
 ## Quality checks
 
@@ -155,7 +164,7 @@ python -m pytest
 ruff check .
 ruff format --check .
 mypy app
-docker build -t kk-pricewatch-collector:0.3.0 .
+docker build -t kk-pricewatch-collector:0.4.0 .
 ```
 
 CI additionally parses every PowerShell deployment script on Windows. Docker remains an
@@ -173,6 +182,6 @@ lightweight. Installation first provisions a matching ChromeDriver into ProgramD
 then proves it works in offline mode before registering the service. After an operator
 updates Chrome, rerun driver provisioning before restarting the Collector. Run the same
 production browser path manually with `deploy/windows/Test-BrowserRuntime.ps1 -Mode
-ProvisionDriver`, followed by `-Mode Offline`. The endpoint remains `StubCollector`; Task
-004 will introduce the real collector. See
+ProvisionDriver`, followed by `-Mode Offline`. The endpoint now uses
+`BrowserCollector`; the stub remains a deterministic test helper. See
 [`docs/tasks/003-selenium-browser-runtime.md`](docs/tasks/003-selenium-browser-runtime.md).
