@@ -21,7 +21,9 @@ function Install-Package {
     if ($LASTEXITCODE -ne 0) { throw 'Package installation failed.' }
     & $pythonExe -m compileall -q (Join-Path $RepositoryPath 'app')
     if ($LASTEXITCODE -ne 0) { throw 'Python compile smoke check failed.' }
-    & $pythonExe -c 'from app.main import create_app; print("import smoke: ok")'
+    # Avoid Python string literals here: Windows PowerShell 5.1 does not preserve
+    # nested quotes consistently when invoking native executables.
+    & $pythonExe -c 'from app.main import create_app; assert callable(create_app)'
     if ($LASTEXITCODE -ne 0) { throw 'Python import smoke check failed.' }
 }
 function Wait-Health {

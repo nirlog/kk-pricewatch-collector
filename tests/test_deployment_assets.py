@@ -95,6 +95,18 @@ def test_windows_ci_executes_shared_python_runtime_resolution() -> None:
     assert "missing-python.exe" in smoke
 
 
+def test_update_import_smoke_is_cross_powershell_safe_and_executed_in_ci() -> None:
+    updater = (WINDOWS_DEPLOYMENT / "Update-Collector.ps1").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    safe_smoke = "from app.main import create_app; assert callable(create_app)"
+
+    assert safe_smoke in updater
+    assert 'print("import smoke: ok")' not in updater
+    assert "python -m pip install -e ." in workflow
+    assert safe_smoke in workflow
+    assert "if ($LASTEXITCODE -ne 0) { throw 'Python import smoke failed.' }" in workflow
+
+
 def test_collector_installer_recreates_only_venv_when_explicitly_requested() -> None:
     installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
     service_guard = installer.index("Get-Service -Name 'KKPriceWatchCollector'")
