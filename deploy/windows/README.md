@@ -26,15 +26,37 @@ open a firewall rule for port 8000.
 
 ## Install and verify
 
+Production requires Python 3.12 or newer installed machine-wide (for all users). A
+per-user installation under `C:\Users\Administrator\AppData` is unsuitable because
+the `LocalService` identity cannot use that runtime. Pass the full path to the
+machine-wide interpreter, for example `C:\Program Files\Python313\python.exe` (the
+supported minor version is not fixed).
+
 Clone an explicit release/tag/commit into the runtime path first. Supply a downloaded,
 operator-verified WinSW executable:
 
 ```powershell
 .\deploy\windows\Install-CollectorService.ps1 `
   -WinSWPath 'C:\Installers\WinSW-x64.exe' `
-  -RepositoryPath 'C:\Services\kk-pricewatch-collector'
+  -RepositoryPath 'C:\Services\kk-pricewatch-collector' `
+  -Python 'C:\Program Files\Python313\python.exe'
 .\deploy\windows\Get-CollectorStatus.ps1
 ```
+
+The installer resolves launchers such as `py` to their concrete base interpreter and
+rejects a user-scoped runtime. It also validates the base runtime recorded in an
+existing `.venv` before reuse. To explicitly replace only that virtual environment
+after installing machine-wide Python, while no Collector service is installed, run:
+
+```powershell
+.\deploy\windows\Install-CollectorService.ps1 `
+  -WinSWPath C:\WinSW-x64.exe `
+  -Python 'C:\Program Files\Python313\python.exe' `
+  -RecreateVenv
+```
+
+Without `-RecreateVenv`, an incompatible existing environment is left untouched and
+the installer reports its detected base runtime.
 
 When migrating from a foreground Uvicorn process, stop it before running the installer.
 Installation refuses to continue if any process is already listening on local TCP port

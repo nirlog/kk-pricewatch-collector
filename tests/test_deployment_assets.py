@@ -62,6 +62,33 @@ def test_collector_installer_guards_port_and_cleans_up_failed_install() -> None:
     assert "& $serviceExe uninstall" in installer
 
 
+def test_collector_installer_rejects_user_scoped_python_runtime() -> None:
+    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    assert "function Test-UserScopedPath" in installer
+    assert "Join-Path $env:SystemDrive 'Users'" in installer
+    assert "is user-scoped and cannot be used by LocalService" in installer
+    assert "provide its executable path with -Python" in installer
+
+
+def test_collector_installer_resolves_explicit_python_and_validates_existing_venv() -> None:
+    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    assert "[string] $Python = 'py'" in installer
+    assert "sys.executable" in installer
+    assert 'getattr(sys, "_base_executable"' in installer
+    assert "function Get-VenvBaseExecutable" in installer
+    assert "Join-Path $VenvPath 'pyvenv.cfg'" in installer
+    assert "Existing virtual environment" in installer
+
+
+def test_collector_installer_recreates_only_venv_when_explicitly_requested() -> None:
+    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    service_guard = installer.index("Get-Service -Name 'KKPriceWatchCollector'")
+    removal = installer.index("Remove-Item -LiteralPath $venvPath -Recurse -Force")
+    assert "[switch] $RecreateVenv" in installer
+    assert "if ($RecreateVenv)" in installer
+    assert service_guard < removal
+
+
 def test_health_polling_sleeps_after_every_unsuccessful_attempt() -> None:
     for name in ("Install-CollectorService.ps1", "Update-Collector.ps1"):
         script = (WINDOWS_DEPLOYMENT / name).read_text(encoding="utf-8")
