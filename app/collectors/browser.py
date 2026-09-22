@@ -4,7 +4,15 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol, cast
 
 from pydantic import ValidationError
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import (
+    InvalidSelectorException,
+    InvalidSessionIdException,
+    NoSuchElementException,
+    NoSuchWindowException,
+    StaleElementReferenceException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -25,6 +33,10 @@ from app.contract.v1 import (
 
 class SessionFactory(Protocol):
     def session(self) -> AbstractContextManager[WebDriver]: ...
+
+
+class _InvalidSelector:
+    """Internal marker preventing selector errors from crossing the session context."""
 
 
 class BrowserCollector:
@@ -51,17 +63,29 @@ class BrowserCollector:
             )
 
         policy = UrlPolicy(options.allowed_hosts, self._resolver)
+        invalid_selector = False
         try:
             with self._session_factory.session() as driver:
                 driver.set_page_load_timeout(options.page_load_timeout_seconds)
-                results = [
-                    self._collect_item(driver, item.id, item.url, options, policy)
-                    for item in request.items
-                ]
+                results: list[SuccessfulItem | FailedItem] = []
+                for item in request.items:
+                    result = self._collect_item(driver, item.id, item.url, options, policy)
+                    if isinstance(result, _InvalidSelector):
+                        invalid_selector = True
+                        break
+                    results.append(result)
         except Exception:
             return FailedResponse(
                 request_id=request.request_id,
                 error=CollectorError(code="COLLECTOR_ERROR", message="Collector failed."),
+            )
+        if invalid_selector:
+            return FailedResponse(
+                request_id=request.request_id,
+                error=CollectorError(
+                    code="BROWSER_CONFIGURATION_ERROR",
+                    message="Browser collector selector is invalid.",
+                ),
             )
         return SuccessfulResponse(request_id=request.request_id, items=results)
 
@@ -72,7 +96,7 @@ class BrowserCollector:
         url: str,
         options: BrowserCollectorOptions,
         policy: UrlPolicy,
-    ) -> SuccessfulItem | FailedItem:
+    ) -> SuccessfulItem | FailedItem | _InvalidSelector:
         try:
             policy.validate_before_navigation(url)
         except UnsafeUrlError:
@@ -80,11 +104,17 @@ class BrowserCollector:
 
         try:
             driver.get(url)
+        except (InvalidSessionIdException, NoSuchWindowException):
+            raise
         except (TimeoutException, WebDriverException):
             return self._item_error(item_id, "PAGE_LOAD_FAILED", "Page could not be loaded.")
 
         try:
             policy.validate_after_navigation(driver.current_url)
+        except (InvalidSessionIdException, NoSuchWindowException):
+            raise
+        except WebDriverException:
+            return self._item_error(item_id, "PAGE_LOAD_FAILED", "Page could not be loaded.")
         except UnsafeUrlError:
             return self._item_error(item_id, "INVALID_URL", "Redirect URL is not allowed.")
 
@@ -102,11 +132,22 @@ class BrowserCollector:
         try:
             raw = cast(
                 str,
-                WebDriverWait(cast(Any, driver), options.wait_timeout_seconds).until(
-                    extracted_value
-                ),
+                WebDriverWait(
+                    cast(Any, driver),
+                    options.wait_timeout_seconds,
+                    ignored_exceptions=(
+                        NoSuchElementException,
+                        StaleElementReferenceException,
+                    ),
+                ).until(extracted_value),
             )
+        except InvalidSelectorException:
+            return _InvalidSelector()
+        except (InvalidSessionIdException, NoSuchWindowException):
+            raise
         except TimeoutException:
+            return self._item_error(item_id, "PRICE_NOT_FOUND", "Price was not found.")
+        except WebDriverException:
             return self._item_error(item_id, "PRICE_NOT_FOUND", "Price was not found.")
         try:
             price = parse_price(raw, options.decimal_separator)

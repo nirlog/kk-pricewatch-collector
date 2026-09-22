@@ -3,7 +3,14 @@ from contextlib import contextmanager
 from typing import Any
 
 import pytest
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
+from selenium.common.exceptions import (
+    InvalidSelectorException,
+    InvalidSessionIdException,
+    NoSuchElementException,
+    StaleElementReferenceException,
+    TimeoutException,
+    WebDriverException,
+)
 
 from app.collectors.browser import BrowserCollector
 from app.contract.v1 import CollectorRequest
@@ -21,7 +28,9 @@ class Element:
 class Driver:
     title = ""
 
-    def __init__(self, pages: dict[str, Element | Exception | str]) -> None:
+    def __init__(
+        self, pages: dict[str, Element | Exception | str | list[Element | Exception]]
+    ) -> None:
         self.pages = pages
         self.current_url = ""
         self.timeouts: list[float] = []
@@ -41,6 +50,13 @@ class Driver:
     def find_element(self, by: str, value: str) -> Element:
         del by, value
         page = self.pages[self.visited[-1]]
+        if isinstance(page, list):
+            if not page:
+                raise NoSuchElementException()
+            outcome = page.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
         if not isinstance(page, Element):
             raise NoSuchElementException()
         return page
@@ -71,18 +87,25 @@ class Factory:
 
 
 class ImmediateWait:
-    def __init__(self, driver: Driver, timeout: int) -> None:
+    def __init__(
+        self,
+        driver: Driver,
+        timeout: int,
+        ignored_exceptions: tuple[type[Exception], ...] = (),
+    ) -> None:
         del timeout
         self.driver = driver
+        self.ignored_exceptions = ignored_exceptions
 
     def until(self, condition: Any) -> str:
-        try:
-            value = condition(self.driver)
-        except NoSuchElementException as exc:
-            raise TimeoutException() from exc
-        if not value:
-            raise TimeoutException()
-        return str(value)
+        for _ in range(5):
+            try:
+                value = condition(self.driver)
+            except self.ignored_exceptions:
+                continue
+            if value:
+                return str(value)
+        raise TimeoutException()
 
 
 def request(urls: list[str], **browser_overrides: object) -> CollectorRequest:
@@ -153,6 +176,72 @@ def test_mixed_item_failures_do_not_stop_request() -> None:
         "PAGE_LOAD_FAILED",
         "PRICE_INVALID",
     ]
+
+
+def test_transient_lookup_failures_timeout_without_aborting_later_items() -> None:
+    urls = [
+        "https://example.com/first",
+        "https://example.com/transient",
+        "https://example.com/last",
+    ]
+    driver = Driver(
+        {
+            urls[0]: Element("10,00"),
+            urls[1]: [
+                NoSuchElementException("not rendered"),
+                StaleElementReferenceException("re-rendered"),
+                Element(""),
+            ],
+            urls[2]: Element("30,00"),
+        }
+    )
+
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(request(urls))
+
+    assert response.success is True
+    assert [item.id for item in response.items] == ["0", "1", "2"]
+    assert response.items[0].success is True
+    assert response.items[1].success is False
+    assert response.items[1].error.code == "PRICE_NOT_FOUND"
+    assert response.items[2].success is True
+    assert driver.visited == urls
+    assert driver.quit_calls == 1
+
+
+def test_invalid_selector_is_sanitized_global_configuration_failure() -> None:
+    url = "https://example.com/product"
+    driver = Driver({url: [InvalidSelectorException("selector and local path details")]})
+
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
+        request([url])
+    )
+
+    assert response.success is False
+    assert response.error.model_dump() == {
+        "code": "BROWSER_CONFIGURATION_ERROR",
+        "message": "Browser collector selector is invalid.",
+    }
+    assert "details" not in response.error.message
+    assert driver.quit_calls == 1
+
+
+def test_lost_browser_session_remains_global_collector_failure() -> None:
+    urls = ["https://example.com/first", "https://example.com/lost"]
+    driver = Driver(
+        {
+            urls[0]: Element("10,00"),
+            urls[1]: [InvalidSessionIdException("session and local path details")],
+        }
+    )
+
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(request(urls))
+
+    assert response.success is False
+    assert response.error.model_dump() == {
+        "code": "COLLECTOR_ERROR",
+        "message": "Collector failed.",
+    }
+    assert driver.quit_calls == 1
 
 
 def test_attribute_extraction_and_redirect_policy() -> None:
