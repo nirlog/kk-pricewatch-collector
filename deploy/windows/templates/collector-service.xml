@@ -15,6 +15,7 @@
   <env name="SE_AVOID_BROWSER_DOWNLOAD" value="true" />
   <env name="KK_PRICEWATCH_BROWSER_PREFLIGHT" value="true" />
   <startmode>Automatic</startmode>
+  <autoRefresh>false</autoRefresh>
   <serviceaccount>
     <username>NT AUTHORITY\LocalService</username>
     <allowservicelogon>true</allowservicelogon>

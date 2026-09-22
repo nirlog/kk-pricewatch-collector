@@ -167,6 +167,11 @@ diagnostics. The production WinSW process always sets `SE_CACHE_PATH`, `SE_OFFLI
 `SE_AVOID_STATS=true`, and `SE_AVOID_BROWSER_DOWNLOAD=true`. Startup preflight is thus
 strictly offline and cache-only; `/health` never starts Chrome.
 
+WinSW `autoRefresh` is intentionally disabled in the Collector service template. The
+low-privilege `NT AUTHORITY\LocalService` runtime must not attempt to modify its own SCM
+service registration when generated XML changes. Only elevated install/update operations
+may change the registered Windows service configuration.
+
 Directly exercise the same production factory in both explicit modes:
 
 ```powershell

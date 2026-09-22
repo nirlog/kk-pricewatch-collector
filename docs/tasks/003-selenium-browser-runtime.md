@@ -41,6 +41,9 @@ Bitrix -> HTTPS/Caddy -> FastAPI -> future BrowserCollector (inactive in Task 00
   ProgramData cache, but never Chrome and never telemetry; an `Offline` smoke then proves
   the prepared cache is sufficient. Either failure prevents service installation while
   retaining cache data for diagnostics.
+- The WinSW template explicitly sets `<autoRefresh>false</autoRefresh>`. LocalService
+  must only run the configured process; it must never try to update its own Windows SCM
+  registration. Service configuration changes belong to elevated install/update scripts.
 
 ## Acceptance criteria
 
@@ -53,7 +56,8 @@ Bitrix -> HTTPS/Caddy -> FastAPI -> future BrowserCollector (inactive in Task 00
    unchanged stub endpoint/security behavior.
 4. Windows installation requires a machine-wide Chrome path, creates browser/cache
    directories, applies LocalService Modify ACL only there, preserves the read-only token
-   ACL, and generates secret-free WinSW browser environment settings.
+   ACL, generates secret-free WinSW browser environment settings, and disables WinSW
+   auto-refresh for the low-privilege runtime identity.
 5. `Test-BrowserRuntime.ps1` invokes the production Python factory and returns non-zero
    on failure. Its explicit `ProvisionDriver` and `Offline` modes control Selenium
    Manager without duplicating Selenium in PowerShell.

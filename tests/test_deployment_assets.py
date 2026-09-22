@@ -130,6 +130,7 @@ def test_browser_runtime_service_configuration_is_secure_and_explicit() -> None:
     assert "*S-1-5-19:(R)" in installer  # token remains read-only
     assert "NT AUTHORITY\\LocalService" in template
     assert "<startmode>Automatic</startmode>" in template
+    assert "<autoRefresh>false</autoRefresh>" in template
     assert 'name="KK_PRICEWATCH_BROWSER_PREFLIGHT" value="true"' in template
     assert 'name="SE_CACHE_PATH" value="{{SELENIUM_CACHE_DIR}}"' in template
     assert 'name="SE_OFFLINE" value="true"' in template
