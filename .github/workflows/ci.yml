@@ -26,11 +26,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Parse PowerShell deployment scripts
         shell: pwsh
         run: |
           $errors = @()
-          Get-ChildItem deploy/windows -Filter *.ps1 | ForEach-Object {
+          Get-ChildItem deploy/windows -File | Where-Object Extension -in '.ps1', '.psm1' | ForEach-Object {
             $tokens = $null
             $fileErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -42,3 +45,6 @@ jobs:
             $errors | Format-List
             throw "PowerShell syntax validation failed."
           }
+      - name: Exercise Python runtime resolution
+        shell: pwsh
+        run: ./deploy/windows/Test-CollectorRuntime.ps1 -Python (Get-Command python).Source

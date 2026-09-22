@@ -12,6 +12,8 @@ def test_expected_windows_deployment_assets_exist() -> None:
         "Get-CollectorStatus.ps1",
         "Install-CaddyService.ps1",
         "Uninstall-CaddyService.ps1",
+        "CollectorRuntime.psm1",
+        "Test-CollectorRuntime.ps1",
         "templates/collector-service.xml",
         "templates/caddy-service.xml",
     }
@@ -63,21 +65,33 @@ def test_collector_installer_guards_port_and_cleans_up_failed_install() -> None:
 
 
 def test_collector_installer_rejects_user_scoped_python_runtime() -> None:
-    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
-    assert "function Test-UserScopedPath" in installer
-    assert "Join-Path $env:SystemDrive 'Users'" in installer
-    assert "is user-scoped and cannot be used by LocalService" in installer
-    assert "provide its executable path with -Python" in installer
+    runtime = (WINDOWS_DEPLOYMENT / "CollectorRuntime.psm1").read_text(encoding="utf-8")
+    assert "function Test-UserScopedPath" in runtime
+    assert "Join-Path $env:SystemDrive 'Users'" in runtime
+    assert "is user-scoped and cannot be used by LocalService" in runtime
+    assert "provide its executable path with -Python" in runtime
 
 
 def test_collector_installer_resolves_explicit_python_and_validates_existing_venv() -> None:
     installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    runtime = (WINDOWS_DEPLOYMENT / "CollectorRuntime.psm1").read_text(encoding="utf-8")
     assert "[string] $Python = 'py'" in installer
-    assert "sys.executable" in installer
-    assert 'getattr(sys, "_base_executable"' in installer
-    assert "function Get-VenvBaseExecutable" in installer
-    assert "Join-Path $VenvPath 'pyvenv.cfg'" in installer
+    assert "Import-Module (Join-Path $PSScriptRoot 'CollectorRuntime.psm1')" in installer
+    assert "sys.executable" in runtime
+    assert "sys._base_executable" in runtime
+    assert "json" not in runtime.lower()
+    assert "function Get-VenvBaseExecutable" in runtime
+    assert "Join-Path $VenvPath 'pyvenv.cfg'" in runtime
     assert "Existing virtual environment" in installer
+
+
+def test_windows_ci_executes_shared_python_runtime_resolution() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    smoke = (WINDOWS_DEPLOYMENT / "Test-CollectorRuntime.ps1").read_text(encoding="utf-8")
+    assert "Test-CollectorRuntime.ps1 -Python (Get-Command python).Source" in workflow
+    assert "Import-Module (Join-Path $PSScriptRoot 'CollectorRuntime.psm1')" in smoke
+    assert "Resolve-PythonRuntime -Command $Python" in smoke
+    assert "missing-python.exe" in smoke
 
 
 def test_collector_installer_recreates_only_venv_when_explicitly_requested() -> None:
