@@ -4,6 +4,7 @@ param(
     [string] $RepositoryPath = 'C:\Services\kk-pricewatch-collector',
     [string] $Python = 'py',
     [string] $DataPath = 'C:\ProgramData\KKPriceWatchCollector',
+    [Parameter(Mandatory)] [string] $ChromeBinary,
     [string] $ProtectedTokenFile,
     [switch] $RecreateVenv
 )
@@ -40,7 +41,16 @@ Assert-Administrator
 $RepositoryPath = [IO.Path]::GetFullPath($RepositoryPath)
 $WinSWPath = [IO.Path]::GetFullPath($WinSWPath)
 $DataPath = [IO.Path]::GetFullPath($DataPath)
+$ChromeBinary = [IO.Path]::GetFullPath($ChromeBinary)
 if (-not (Test-Path -LiteralPath $WinSWPath -PathType Leaf)) { throw "WinSW executable not found: $WinSWPath" }
+if (-not (Test-Path -LiteralPath $ChromeBinary -PathType Leaf)) {
+    throw "Machine-wide Chrome executable not found: $ChromeBinary"
+}
+$usersRoot = [IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Users'))
+if ($ChromeBinary.StartsWith($usersRoot + [IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Chrome must be machine-wide and must not be installed under C:\Users.'
+}
 if (-not (Test-Path -LiteralPath (Join-Path $RepositoryPath 'pyproject.toml') -PathType Leaf) -or
     -not (Test-Path -LiteralPath (Join-Path $RepositoryPath 'app') -PathType Container)) {
     throw "Repository/runtime directory is invalid: $RepositoryPath"
@@ -83,9 +93,27 @@ if ($LASTEXITCODE -ne 0) { throw 'Package installation failed.' }
 $logPath = Join-Path $DataPath 'logs'
 $secretPath = Join-Path $DataPath 'secrets'
 $servicePath = Join-Path $DataPath 'service'
-@($DataPath, $logPath, $secretPath, $servicePath) | ForEach-Object {
+$browserPath = Join-Path $DataPath 'browser'
+$seleniumCachePath = Join-Path $DataPath 'selenium-cache'
+@($DataPath, $logPath, $secretPath, $servicePath, $browserPath, $seleniumCachePath) | ForEach-Object {
     New-Item -ItemType Directory -Path $_ -Force | Out-Null
 }
+@($browserPath, $seleniumCachePath) | ForEach-Object {
+    & icacls.exe $_ /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)(F)' `
+        '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-19:(OI)(CI)(M)'
+    if ($LASTEXITCODE -ne 0) { throw "Failed to configure browser runtime ACL: $_" }
+}
+
+# Provisioning may download only a matching driver. The second run proves that
+# production startup can resolve that driver with Selenium Manager fully offline.
+$browserSmoke = Join-Path $PSScriptRoot 'Test-BrowserRuntime.ps1'
+& $browserSmoke -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath `
+    -Mode ProvisionDriver
+if ($LASTEXITCODE -ne 0) { throw 'ChromeDriver provisioning failed; service was not installed.' }
+& $browserSmoke -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath `
+    -Mode Offline
+if ($LASTEXITCODE -ne 0) { throw 'Offline browser verification failed; service was not installed.' }
+
 $tokenFile = Join-Path $secretPath 'api-token.txt'
 if ($ProtectedTokenFile) {
     $source = [IO.Path]::GetFullPath($ProtectedTokenFile)
@@ -125,6 +153,9 @@ $template = $template.Replace('{{PYTHON_EXE}}', (& $escape $pythonExe))
 $template = $template.Replace('{{REPOSITORY_DIR}}', (& $escape $RepositoryPath))
 $template = $template.Replace('{{TOKEN_FILE}}', (& $escape $tokenFile))
 $template = $template.Replace('{{LOG_DIR}}', (& $escape $logPath))
+$template = $template.Replace('{{CHROME_BINARY}}', (& $escape $ChromeBinary))
+$template = $template.Replace('{{BROWSER_DATA_DIR}}', (& $escape $browserPath))
+$template = $template.Replace('{{SELENIUM_CACHE_DIR}}', (& $escape $seleniumCachePath))
 [IO.File]::WriteAllText($serviceXml, $template, [Text.UTF8Encoding]::new($false))
 
 & $serviceExe install

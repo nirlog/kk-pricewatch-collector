@@ -14,6 +14,7 @@ def test_expected_windows_deployment_assets_exist() -> None:
         "Uninstall-CaddyService.ps1",
         "CollectorRuntime.psm1",
         "Test-CollectorRuntime.ps1",
+        "Test-BrowserRuntime.ps1",
         "templates/collector-service.xml",
         "templates/caddy-service.xml",
     }
@@ -116,3 +117,44 @@ def test_caddy_install_verifies_running_service_state() -> None:
     installer = (WINDOWS_DEPLOYMENT / "Install-CaddyService.ps1").read_text(encoding="utf-8")
     assert "Get-Service -Name 'KKPriceWatchCaddy'" in installer
     assert "$runningService.Status -ne 'Running'" in installer
+
+
+def test_browser_runtime_service_configuration_is_secure_and_explicit() -> None:
+    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    template = (WINDOWS_DEPLOYMENT / "templates/collector-service.xml").read_text(encoding="utf-8")
+    assert "[Parameter(Mandatory)] [string] $ChromeBinary" in installer
+    assert "must not be installed under C:\\Users" in installer
+    assert "'browser'" in installer
+    assert "'selenium-cache'" in installer
+    assert "*S-1-5-19:(OI)(CI)(M)" in installer
+    assert "*S-1-5-19:(R)" in installer  # token remains read-only
+    assert "NT AUTHORITY\\LocalService" in template
+    assert "<startmode>Automatic</startmode>" in template
+    assert "<autoRefresh>false</autoRefresh>" in template
+    assert 'name="KK_PRICEWATCH_BROWSER_PREFLIGHT" value="true"' in template
+    assert 'name="SE_CACHE_PATH" value="{{SELENIUM_CACHE_DIR}}"' in template
+    assert 'name="SE_OFFLINE" value="true"' in template
+    assert 'name="SE_AVOID_STATS" value="true"' in template
+    assert 'name="SE_AVOID_BROWSER_DOWNLOAD" value="true"' in template
+    assert "{{API_TOKEN}}" not in template
+
+
+def test_browser_smoke_delegates_to_production_python_runtime() -> None:
+    smoke = (WINDOWS_DEPLOYMENT / "Test-BrowserRuntime.ps1").read_text(encoding="utf-8")
+    assert "-m app.browser.smoke" in smoke
+    assert "selenium.webdriver" not in smoke
+    assert "[ValidateSet('ProvisionDriver', 'Offline')]" in smoke
+    assert "$env:SE_AVOID_BROWSER_DOWNLOAD = 'true'" in smoke
+    assert "$env:SE_AVOID_STATS = 'true'" in smoke
+    assert "Remove-Item Env:SE_OFFLINE" in smoke
+    assert "$env:SE_OFFLINE = 'true'" in smoke
+
+
+def test_installer_provisions_then_verifies_offline_before_service_registration() -> None:
+    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    provision = installer.index("-Mode ProvisionDriver")
+    offline = installer.index("-Mode Offline")
+    service_install = installer.index("& $serviceExe install")
+    assert provision < offline < service_install
+    assert "Offline browser verification failed; service was not installed." in installer
+    assert installer.index("-Mode Offline") < installer.index("$tokenFile =")

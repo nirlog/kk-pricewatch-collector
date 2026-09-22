@@ -15,7 +15,8 @@ C:\ProgramData\KKPriceWatchCollector\
   logs\                 WinSW-managed stdout/stderr, rotated by size
   secrets\api-token.txt
   service\              supplied WinSW copy and generated XML
-  browser\              reserved for a future task; not created by Task 002
+  browser\              isolated temporary Chrome profiles
+  selenium-cache\       Selenium Manager driver cache
 ```
 
 The Collector runs as `NT AUTHORITY\LocalService`, binds only
@@ -137,6 +138,60 @@ fails unless Windows reports the service as Running. Wrapper logs rotate separat
 `C:\ProgramData\KKPriceWatchCaddy\logs`; configure Caddy access logs separately if
 required. Remove only the service with `Uninstall-CaddyService.ps1`.
 
-No Selenium, Chrome, driver, Playwright, interactive desktop, or scraping dependency is
-installed. A future task may create the reserved `browser` directory and grant narrowly
-scoped access to the same service identity.
+## Selenium/Chrome runtime and Task 002 migration
+
+Chrome must be installed machine-wide by the operator; application code never installs
+it. A browser below `C:\Users` (including Administrator AppData) is rejected. Install with:
+
+```powershell
+.\deploy\windows\Install-CollectorService.ps1 `
+  -WinSWPath 'C:\WinSW-x64.exe' `
+  -Python 'C:\Program Files\Python313\python.exe' `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+```
+
+The installer creates `browser` and `selenium-cache` below ProgramData. Administrators
+and SYSTEM receive Full Control and LocalService receives Modify there. The token keeps
+its separate read-only LocalService ACL.
+
+Before registering the service, installation runs two distinct phases as Administrator:
+
+1. `ProvisionDriver` is online-capable so Selenium Manager may obtain the matching
+   ChromeDriver in the ProgramData cache. It sets `SE_AVOID_BROWSER_DOWNLOAD=true` and
+   `SE_AVOID_STATS=true`: it cannot download Chrome and does not send statistics.
+2. `Offline` sets `SE_OFFLINE=true` and proves that the populated cache is sufficient.
+
+Both use the production Python `BrowserSessionFactory` and navigate only deterministic
+`data:` content. Failure happens before WinSW registration; cache and logs remain for
+diagnostics. The production WinSW process always sets `SE_CACHE_PATH`, `SE_OFFLINE=true`,
+`SE_AVOID_STATS=true`, and `SE_AVOID_BROWSER_DOWNLOAD=true`. Startup preflight is thus
+strictly offline and cache-only; `/health` never starts Chrome.
+
+WinSW `autoRefresh` is intentionally disabled in the Collector service template. The
+low-privilege `NT AUTHORITY\LocalService` runtime must not attempt to modify its own SCM
+service registration when generated XML changes. Only elevated install/update operations
+may change the registered Windows service configuration.
+
+Directly exercise the same production factory in both explicit modes:
+
+```powershell
+.\deploy\windows\Test-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -Mode ProvisionDriver
+.\deploy\windows\Test-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -Mode Offline
+```
+
+To migrate an installed Task 002 service, back up the retained token, check out the
+reviewed 0.3.0 release, and run `Uninstall-CollectorService.ps1` **without** `-PurgeData`.
+Then rerun the installer above. With no `-ProtectedTokenFile`, it reuses
+`C:\ProgramData\KKPriceWatchCollector\secrets\api-token.txt`, regenerates service XML,
+and verifies preflight and health. Confirm Running/Automatic with the status script.
+This flow preserves service data and the `NT AUTHORITY\LocalService` identity. Never
+use `-PurgeData` for migration or grant LocalService access to an Administrator profile.
+If Chrome is updated later, stop the Collector, run `ProvisionDriver` and then `Offline`,
+and only restart after offline verification succeeds.
+
+Selenium uses official Selenium Manager. Playwright, webdriver-manager, browser evasion,
+CAPTCHA handling, proxies, and competitor scraping remain absent.
