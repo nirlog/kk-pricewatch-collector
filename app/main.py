@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import __version__
-from app.api.collectors import create_collectors_router
+from app.api.collectors import Collector, create_collectors_router
 from app.browser.chrome import BrowserSessionFactory
 from app.settings import Settings
 
@@ -14,6 +14,7 @@ from app.settings import Settings
 def create_app(
     settings: Settings | None = None,
     browser_factory_builder: Callable[[Settings], BrowserSessionFactory] = BrowserSessionFactory,
+    browser_collector: Collector | None = None,
 ) -> FastAPI:
     runtime_settings = settings if settings is not None else Settings()
 
@@ -29,5 +30,5 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    app.include_router(create_collectors_router(runtime_settings))
+    app.include_router(create_collectors_router(runtime_settings, browser_collector))
     return app
