@@ -1,0 +1,23 @@
+<service>
+  <id>KKPriceWatchCaddy</id>
+  <name>KK PriceWatch Caddy</name>
+  <description>HTTPS reverse proxy for kk.pricewatch collector</description>
+  <executable>{{CADDY_EXE}}</executable>
+  <arguments>run --config "{{CADDYFILE}}"</arguments>
+  <workingdirectory>{{CADDY_DIR}}</workingdirectory>
+  <startmode>Automatic</startmode>
+  <serviceaccount>
+    <username>NT AUTHORITY\LocalService</username>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="60 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <logpath>{{CADDY_LOG_DIR}}</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <stoptimeout>15 sec</stoptimeout>
+</service>

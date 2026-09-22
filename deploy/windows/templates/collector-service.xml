@@ -1,0 +1,24 @@
+<service>
+  <id>KKPriceWatchCollector</id>
+  <name>KK PriceWatch Collector</name>
+  <description>External collection service for kk.pricewatch</description>
+  <executable>{{PYTHON_EXE}}</executable>
+  <arguments>-m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000</arguments>
+  <workingdirectory>{{REPOSITORY_DIR}}</workingdirectory>
+  <env name="KK_PRICEWATCH_API_TOKEN_FILE" value="{{TOKEN_FILE}}" />
+  <startmode>Automatic</startmode>
+  <serviceaccount>
+    <username>NT AUTHORITY\LocalService</username>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="60 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <logpath>{{LOG_DIR}}</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <stoptimeout>15 sec</stoptimeout>
+</service>
