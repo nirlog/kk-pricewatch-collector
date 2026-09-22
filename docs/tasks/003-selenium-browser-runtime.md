@@ -32,7 +32,15 @@ Bitrix -> HTTPS/Caddy -> FastAPI -> future BrowserCollector (inactive in Task 00
   anti-bot behavior are explicitly absent.
 - `KK_PRICEWATCH_BROWSER_PREFLIGHT` defaults to false. When true, application startup
   loads a deterministic `data:` document, executes JavaScript, verifies its title, and
-  quits. Failure aborts startup. `/health` never launches Chrome.
+  quits. Failure aborts startup. `/health` never launches Chrome. The production WinSW
+  process sets `SE_OFFLINE=true`, `SE_AVOID_STATS=true`, and
+  `SE_AVOID_BROWSER_DOWNLOAD=true`, so Selenium Manager is cache-only and cannot make
+  startup or preflight depend on the public internet.
+- Installation has two explicit browser phases before service registration: an
+  online-capable `ProvisionDriver` smoke may download a matching ChromeDriver into the
+  ProgramData cache, but never Chrome and never telemetry; an `Offline` smoke then proves
+  the prepared cache is sufficient. Either failure prevents service installation while
+  retaining cache data for diagnostics.
 
 ## Acceptance criteria
 
@@ -47,7 +55,8 @@ Bitrix -> HTTPS/Caddy -> FastAPI -> future BrowserCollector (inactive in Task 00
    directories, applies LocalService Modify ACL only there, preserves the read-only token
    ACL, and generates secret-free WinSW browser environment settings.
 5. `Test-BrowserRuntime.ps1` invokes the production Python factory and returns non-zero
-   on failure. No second PowerShell Selenium implementation exists.
+   on failure. Its explicit `ProvisionDriver` and `Offline` modes control Selenium
+   Manager without duplicating Selenium in PowerShell.
 
 ## Explicitly out of scope
 

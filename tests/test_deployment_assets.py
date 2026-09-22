@@ -132,6 +132,9 @@ def test_browser_runtime_service_configuration_is_secure_and_explicit() -> None:
     assert "<startmode>Automatic</startmode>" in template
     assert 'name="KK_PRICEWATCH_BROWSER_PREFLIGHT" value="true"' in template
     assert 'name="SE_CACHE_PATH" value="{{SELENIUM_CACHE_DIR}}"' in template
+    assert 'name="SE_OFFLINE" value="true"' in template
+    assert 'name="SE_AVOID_STATS" value="true"' in template
+    assert 'name="SE_AVOID_BROWSER_DOWNLOAD" value="true"' in template
     assert "{{API_TOKEN}}" not in template
 
 
@@ -139,3 +142,18 @@ def test_browser_smoke_delegates_to_production_python_runtime() -> None:
     smoke = (WINDOWS_DEPLOYMENT / "Test-BrowserRuntime.ps1").read_text(encoding="utf-8")
     assert "-m app.browser.smoke" in smoke
     assert "selenium.webdriver" not in smoke
+    assert "[ValidateSet('ProvisionDriver', 'Offline')]" in smoke
+    assert "$env:SE_AVOID_BROWSER_DOWNLOAD = 'true'" in smoke
+    assert "$env:SE_AVOID_STATS = 'true'" in smoke
+    assert "Remove-Item Env:SE_OFFLINE" in smoke
+    assert "$env:SE_OFFLINE = 'true'" in smoke
+
+
+def test_installer_provisions_then_verifies_offline_before_service_registration() -> None:
+    installer = (WINDOWS_DEPLOYMENT / "Install-CollectorService.ps1").read_text(encoding="utf-8")
+    provision = installer.index("-Mode ProvisionDriver")
+    offline = installer.index("-Mode Offline")
+    service_install = installer.index("& $serviceExe install")
+    assert provision < offline < service_install
+    assert "Offline browser verification failed; service was not installed." in installer
+    assert installer.index("-Mode Offline") < installer.index("$tokenFile =")

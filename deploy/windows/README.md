@@ -152,13 +152,30 @@ it. A browser below `C:\Users` (including Administrator AppData) is rejected. In
 
 The installer creates `browser` and `selenium-cache` below ProgramData. Administrators
 and SYSTEM receive Full Control and LocalService receives Modify there. The token keeps
-its separate read-only LocalService ACL. WinSW enables startup preflight and configures
-`SE_CACHE_PATH`; preflight uses only deterministic `data:` content. `/health` never
-starts Chrome. Directly exercise the same Python production factory with:
+its separate read-only LocalService ACL.
+
+Before registering the service, installation runs two distinct phases as Administrator:
+
+1. `ProvisionDriver` is online-capable so Selenium Manager may obtain the matching
+   ChromeDriver in the ProgramData cache. It sets `SE_AVOID_BROWSER_DOWNLOAD=true` and
+   `SE_AVOID_STATS=true`: it cannot download Chrome and does not send statistics.
+2. `Offline` sets `SE_OFFLINE=true` and proves that the populated cache is sufficient.
+
+Both use the production Python `BrowserSessionFactory` and navigate only deterministic
+`data:` content. Failure happens before WinSW registration; cache and logs remain for
+diagnostics. The production WinSW process always sets `SE_CACHE_PATH`, `SE_OFFLINE=true`,
+`SE_AVOID_STATS=true`, and `SE_AVOID_BROWSER_DOWNLOAD=true`. Startup preflight is thus
+strictly offline and cache-only; `/health` never starts Chrome.
+
+Directly exercise the same production factory in both explicit modes:
 
 ```powershell
 .\deploy\windows\Test-BrowserRuntime.ps1 `
-  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -Mode ProvisionDriver
+.\deploy\windows\Test-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -Mode Offline
 ```
 
 To migrate an installed Task 002 service, back up the retained token, check out the
@@ -168,6 +185,8 @@ Then rerun the installer above. With no `-ProtectedTokenFile`, it reuses
 and verifies preflight and health. Confirm Running/Automatic with the status script.
 This flow preserves service data and the `NT AUTHORITY\LocalService` identity. Never
 use `-PurgeData` for migration or grant LocalService access to an Administrator profile.
+If Chrome is updated later, stop the Collector, run `ProvisionDriver` and then `Offline`,
+and only restart after offline verification succeeds.
 
 Selenium uses official Selenium Manager. Playwright, webdriver-manager, browser evasion,
 CAPTCHA handling, proxies, and competitor scraping remain absent.

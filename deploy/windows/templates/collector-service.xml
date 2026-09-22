@@ -10,6 +10,9 @@
   <env name="KK_PRICEWATCH_BROWSER_DATA_DIR" value="{{BROWSER_DATA_DIR}}" />
   <env name="KK_PRICEWATCH_SELENIUM_CACHE_DIR" value="{{SELENIUM_CACHE_DIR}}" />
   <env name="SE_CACHE_PATH" value="{{SELENIUM_CACHE_DIR}}" />
+  <env name="SE_OFFLINE" value="true" />
+  <env name="SE_AVOID_STATS" value="true" />
+  <env name="SE_AVOID_BROWSER_DOWNLOAD" value="true" />
   <env name="KK_PRICEWATCH_BROWSER_PREFLIGHT" value="true" />
   <startmode>Automatic</startmode>
   <serviceaccount>

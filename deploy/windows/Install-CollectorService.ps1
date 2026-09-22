@@ -103,6 +103,17 @@ $seleniumCachePath = Join-Path $DataPath 'selenium-cache'
         '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-19:(OI)(CI)(M)'
     if ($LASTEXITCODE -ne 0) { throw "Failed to configure browser runtime ACL: $_" }
 }
+
+# Provisioning may download only a matching driver. The second run proves that
+# production startup can resolve that driver with Selenium Manager fully offline.
+$browserSmoke = Join-Path $PSScriptRoot 'Test-BrowserRuntime.ps1'
+& $browserSmoke -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath `
+    -Mode ProvisionDriver
+if ($LASTEXITCODE -ne 0) { throw 'ChromeDriver provisioning failed; service was not installed.' }
+& $browserSmoke -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath `
+    -Mode Offline
+if ($LASTEXITCODE -ne 0) { throw 'Offline browser verification failed; service was not installed.' }
+
 $tokenFile = Join-Path $secretPath 'api-token.txt'
 if ($ProtectedTokenFile) {
     $source = [IO.Path]::GetFullPath($ProtectedTokenFile)

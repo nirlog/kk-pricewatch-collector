@@ -168,7 +168,11 @@ Task 003 uses official Selenium Manager and an operator-installed, explicitly co
 machine-wide Google Chrome. It creates an isolated temporary profile per session below
 `C:\ProgramData\KKPriceWatchCollector\browser` and keeps the driver cache under
 `selenium-cache`. Production performs one local-only browser preflight during startup;
-`/health` stays lightweight. Run the same production browser path manually with
-`deploy/windows/Test-BrowserRuntime.ps1`. The endpoint remains `StubCollector`; Task 004
-will introduce the real collector. See
+Selenium Manager is strictly offline/cache-only in the WinSW service and `/health` stays
+lightweight. Installation first provisions a matching ChromeDriver into ProgramData,
+then proves it works in offline mode before registering the service. After an operator
+updates Chrome, rerun driver provisioning before restarting the Collector. Run the same
+production browser path manually with `deploy/windows/Test-BrowserRuntime.ps1 -Mode
+ProvisionDriver`, followed by `-Mode Offline`. The endpoint remains `StubCollector`; Task
+004 will introduce the real collector. See
 [`docs/tasks/003-selenium-browser-runtime.md`](docs/tasks/003-selenium-browser-runtime.md).
