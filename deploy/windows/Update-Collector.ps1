@@ -30,7 +30,10 @@ function Wait-Health {
         try {
             $result = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 3
             if ($result.status -eq 'ok' -and @($result.PSObject.Properties).Count -eq 1) { return }
-        } catch { Start-Sleep -Seconds 2 }
+        } catch {
+            # A connection failure is expected while the service is starting.
+        }
+        Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Collector did not become healthy within 60 seconds.'
 }

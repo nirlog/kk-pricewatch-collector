@@ -40,4 +40,9 @@ if ($LASTEXITCODE -ne 0) { throw 'WinSW failed to install the Caddy service.' }
 Set-Service -Name 'KKPriceWatchCaddy' -StartupType Automatic
 & $serviceExe start
 if ($LASTEXITCODE -ne 0) { throw 'WinSW failed to start the Caddy service.' }
+Start-Sleep -Seconds 3
+$runningService = Get-Service -Name 'KKPriceWatchCaddy'
+if ($runningService.Status -ne 'Running') {
+    throw "KKPriceWatchCaddy did not remain running after startup (state: $($runningService.Status))."
+}
 Write-Host 'SUCCESS: KKPriceWatchCaddy is installed and running.'

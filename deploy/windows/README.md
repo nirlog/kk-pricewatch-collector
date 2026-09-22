@@ -36,6 +36,11 @@ operator-verified WinSW executable:
 .\deploy\windows\Get-CollectorStatus.ps1
 ```
 
+When migrating from a foreground Uvicorn process, stop it before running the installer.
+Installation refuses to continue if any process is already listening on local TCP port
+8000; it never terminates that process automatically. This prevents the old process's
+health response from being mistaken for a successfully started Windows service.
+
 If no protected token file already exists, installation prompts with
 `Read-Host -AsSecureString`; the value is not displayed or passed on a command line.
 Alternatively use `-ProtectedTokenFile` with an operator-created file. Re-running the
@@ -92,6 +97,11 @@ collector.example.com {
 
 Validate and install using operator-provided binaries/files:
 
+Before installation, stop any existing foreground Caddy process and verify that it no
+longer listens on the production ports selected by your Caddyfile. The installer does
+not parse reusable Caddyfiles for ports and never kills an existing or unrelated
+process automatically.
+
 ```powershell
 .\deploy\windows\Install-CaddyService.ps1 `
   -CaddyPath 'C:\Tools\caddy.exe' `
@@ -100,7 +110,8 @@ Validate and install using operator-provided binaries/files:
 ```
 
 The script runs `caddy validate` first. `KKPriceWatchCaddy` then starts automatically as
-LocalService and restarts on failure. Wrapper logs rotate separately under
+LocalService and restarts on failure. After a short startup grace period, installation
+fails unless Windows reports the service as Running. Wrapper logs rotate separately under
 `C:\ProgramData\KKPriceWatchCaddy\logs`; configure Caddy access logs separately if
 required. Remove only the service with `Uninstall-CaddyService.ps1`.
 

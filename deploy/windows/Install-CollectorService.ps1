@@ -25,7 +25,10 @@ function Wait-CollectorHealth {
         try {
             $response = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 3
             if ($response.status -eq 'ok' -and @($response.PSObject.Properties).Count -eq 1) { return }
-        } catch { Start-Sleep -Seconds 2 }
+        } catch {
+            # A connection failure is expected while the service is starting.
+        }
+        Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Collector health check did not return the expected response within the timeout.'
 }
@@ -41,6 +44,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $RepositoryPath 'pyproject.toml') -P
 }
 if (Get-Service -Name 'KKPriceWatchCollector' -ErrorAction SilentlyContinue) {
     throw 'KKPriceWatchCollector is already installed. Use Update-Collector.ps1 for an existing installation.'
+}
+$portListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+if ($portListener) {
+    throw 'Port 8000 is already in use. Stop the foreground Collector before installing the Windows service.'
 }
 
 & $Python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'
@@ -104,8 +111,30 @@ $template = $template.Replace('{{LOG_DIR}}', (& $escape $logPath))
 
 & $serviceExe install
 if ($LASTEXITCODE -ne 0) { throw 'WinSW failed to install the Collector service.' }
-Set-Service -Name 'KKPriceWatchCollector' -StartupType Automatic
-& $serviceExe start
-if ($LASTEXITCODE -ne 0) { throw 'WinSW failed to start the Collector service.' }
-Wait-CollectorHealth
+$serviceRegistered = $true
+try {
+    Set-Service -Name 'KKPriceWatchCollector' -StartupType Automatic
+    & $serviceExe start
+    if ($LASTEXITCODE -ne 0) { throw 'WinSW failed to start the Collector service.' }
+    Wait-CollectorHealth
+} catch {
+    $installError = $_.Exception.Message
+    $cleanupError = $null
+    if ($serviceRegistered) {
+        try {
+            $registeredService = Get-Service -Name 'KKPriceWatchCollector' -ErrorAction SilentlyContinue
+            if ($registeredService -and $registeredService.Status -ne 'Stopped') {
+                & $serviceExe stop | Out-Null
+            }
+            & $serviceExe uninstall | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'WinSW failed to uninstall the incomplete service.' }
+        } catch {
+            $cleanupError = $_.Exception.Message
+        }
+    }
+    if ($cleanupError) {
+        throw "Collector installation failed: $installError Cleanup also failed: $cleanupError"
+    }
+    throw "Collector installation failed; the incomplete service was removed: $installError"
+}
 Write-Host 'SUCCESS: KKPriceWatchCollector is installed, running, and healthy.'
