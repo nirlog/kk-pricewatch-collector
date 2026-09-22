@@ -6,6 +6,11 @@
   <arguments>-m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000</arguments>
   <workingdirectory>{{REPOSITORY_DIR}}</workingdirectory>
   <env name="KK_PRICEWATCH_API_TOKEN_FILE" value="{{TOKEN_FILE}}" />
+  <env name="KK_PRICEWATCH_CHROME_BINARY" value="{{CHROME_BINARY}}" />
+  <env name="KK_PRICEWATCH_BROWSER_DATA_DIR" value="{{BROWSER_DATA_DIR}}" />
+  <env name="KK_PRICEWATCH_SELENIUM_CACHE_DIR" value="{{SELENIUM_CACHE_DIR}}" />
+  <env name="SE_CACHE_PATH" value="{{SELENIUM_CACHE_DIR}}" />
+  <env name="KK_PRICEWATCH_BROWSER_PREFLIGHT" value="true" />
   <startmode>Automatic</startmode>
   <serviceaccount>
     <username>NT AUTHORITY\LocalService</username>

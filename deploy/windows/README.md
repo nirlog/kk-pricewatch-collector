@@ -15,7 +15,8 @@ C:\ProgramData\KKPriceWatchCollector\
   logs\                 WinSW-managed stdout/stderr, rotated by size
   secrets\api-token.txt
   service\              supplied WinSW copy and generated XML
-  browser\              reserved for a future task; not created by Task 002
+  browser\              isolated temporary Chrome profiles
+  selenium-cache\       Selenium Manager driver cache
 ```
 
 The Collector runs as `NT AUTHORITY\LocalService`, binds only
@@ -137,6 +138,36 @@ fails unless Windows reports the service as Running. Wrapper logs rotate separat
 `C:\ProgramData\KKPriceWatchCaddy\logs`; configure Caddy access logs separately if
 required. Remove only the service with `Uninstall-CaddyService.ps1`.
 
-No Selenium, Chrome, driver, Playwright, interactive desktop, or scraping dependency is
-installed. A future task may create the reserved `browser` directory and grant narrowly
-scoped access to the same service identity.
+## Selenium/Chrome runtime and Task 002 migration
+
+Chrome must be installed machine-wide by the operator; application code never installs
+it. A browser below `C:\Users` (including Administrator AppData) is rejected. Install with:
+
+```powershell
+.\deploy\windows\Install-CollectorService.ps1 `
+  -WinSWPath 'C:\WinSW-x64.exe' `
+  -Python 'C:\Program Files\Python313\python.exe' `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+```
+
+The installer creates `browser` and `selenium-cache` below ProgramData. Administrators
+and SYSTEM receive Full Control and LocalService receives Modify there. The token keeps
+its separate read-only LocalService ACL. WinSW enables startup preflight and configures
+`SE_CACHE_PATH`; preflight uses only deterministic `data:` content. `/health` never
+starts Chrome. Directly exercise the same Python production factory with:
+
+```powershell
+.\deploy\windows\Test-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+```
+
+To migrate an installed Task 002 service, back up the retained token, check out the
+reviewed 0.3.0 release, and run `Uninstall-CollectorService.ps1` **without** `-PurgeData`.
+Then rerun the installer above. With no `-ProtectedTokenFile`, it reuses
+`C:\ProgramData\KKPriceWatchCollector\secrets\api-token.txt`, regenerates service XML,
+and verifies preflight and health. Confirm Running/Automatic with the status script.
+This flow preserves service data and the `NT AUTHORITY\LocalService` identity. Never
+use `-PurgeData` for migration or grant LocalService access to an Administrator profile.
+
+Selenium uses official Selenium Manager. Playwright, webdriver-manager, browser evasion,
+CAPTCHA handling, proxies, and competitor scraping remain absent.

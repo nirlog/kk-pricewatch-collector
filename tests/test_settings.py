@@ -77,3 +77,43 @@ def test_invalid_token_is_absent_from_validation_error() -> None:
     with pytest.raises(ValidationError) as error:
         Settings(api_token=secret)
     assert "input_value" not in str(error.value)
+
+
+def test_browser_paths_validate_when_configured(tmp_path: Path) -> None:
+    chrome = tmp_path / "chrome.exe"
+    chrome.touch()
+    browser = tmp_path / "browser"
+    cache = tmp_path / "cache"
+    browser.mkdir()
+    cache.mkdir()
+    settings = Settings(
+        api_token="token",
+        chrome_binary=chrome,
+        browser_data_dir=browser,
+        selenium_cache_dir=cache,
+        browser_preflight=True,
+    )
+    assert settings.chrome_binary == chrome
+
+
+def test_browser_preflight_requires_all_runtime_paths() -> None:
+    with pytest.raises(ValidationError, match="preflight requires"):
+        Settings(api_token="token", browser_preflight=True)
+
+
+def test_relative_chrome_path_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="absolute path"):
+        Settings(api_token="token", chrome_binary=Path("chrome.exe"))
+
+
+def test_user_scoped_windows_chrome_path_is_rejected_before_existence_check() -> None:
+    with pytest.raises(ValidationError, match=r"must not be located under C:\\Users"):
+        Settings(
+            api_token="token",
+            chrome_binary=Path(r"C:\Users\Administrator\AppData\chrome.exe"),
+        )
+
+
+def test_chrome_binary_must_be_a_file(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="not a regular file"):
+        Settings(api_token="token", chrome_binary=tmp_path)

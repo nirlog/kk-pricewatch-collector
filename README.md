@@ -4,9 +4,9 @@ Standalone Python collection service for [`nirlog/kk.pricewatch`](https://github
 Its only integration boundary is HTTP collector protocol `1.0`; it imports no Bitrix
 code and shares no database or filesystem with Bitrix.
 
-Version **0.2.0** adds a Windows production-service runtime around the unchanged,
-deterministic protocol stub. It performs no real scraping, browser automation, or
-competitor network requests.
+Version **0.3.0** adds an isolated Selenium/Chrome runtime foundation around the
+unchanged deterministic protocol stub. It performs no real scraping or competitor
+network requests.
 
 ## Local development
 
@@ -41,7 +41,8 @@ The stub's request/response contract and options are documented in
 Production uses this fixed boundary:
 
 ```text
-Bitrix -> public HTTPS -> Caddy -> http://127.0.0.1:8000 -> Uvicorn/FastAPI
+Bitrix -> HTTPS/Caddy -> FastAPI -> future BrowserCollector (inactive in Task 003)
+                               -> BrowserSessionFactory -> Selenium -> headless Chrome
 ```
 
 WinSW runs the Collector automatically as low-privilege LocalService, restarts it after
@@ -56,7 +57,9 @@ Clone an explicit release into `C:\Services\kk-pricewatch-collector`, open eleva
 PowerShell, and provide the path to an operator-downloaded WinSW binary:
 
 ```powershell
-.\deploy\windows\Install-CollectorService.ps1 -WinSWPath 'C:\Installers\WinSW-x64.exe'
+.\deploy\windows\Install-CollectorService.ps1 `
+  -WinSWPath 'C:\Installers\WinSW-x64.exe' `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 ```
 
 The script creates the virtual environment and protected ProgramData directories,
@@ -76,7 +79,7 @@ This displays installation/state/startup/health information, never token metadat
 Always provide an immutable release tag or commit explicitly:
 
 ```powershell
-.\deploy\windows\Update-Collector.ps1 -Ref 'v0.2.0'
+.\deploy\windows\Update-Collector.ps1 -Ref 'v0.3.0'
 ```
 
 A dirty tree is rejected. The updater records the old SHA, installs and smoke-checks
@@ -152,16 +155,20 @@ python -m pytest
 ruff check .
 ruff format --check .
 mypy app
-docker build -t kk-pricewatch-collector:0.2.0 .
+docker build -t kk-pricewatch-collector:0.3.0 .
 ```
 
 CI additionally parses every PowerShell deployment script on Windows. Docker remains an
 optional portability check, not the primary production runtime. Supply its token only
 at runtime; never bake it into an image.
 
-## Future browser runtime
+## Browser runtime foundation
 
-Task 002 installs no Selenium, Chrome/Chromium, ChromeDriver, Playwright, browser code,
-or interactive desktop session. The Windows layout reserves
-`C:\ProgramData\KKPriceWatchCollector\browser` for a future task without creating or
-using it now.
+Task 003 uses official Selenium Manager and an operator-installed, explicitly configured
+machine-wide Google Chrome. It creates an isolated temporary profile per session below
+`C:\ProgramData\KKPriceWatchCollector\browser` and keeps the driver cache under
+`selenium-cache`. Production performs one local-only browser preflight during startup;
+`/health` stays lightweight. Run the same production browser path manually with
+`deploy/windows/Test-BrowserRuntime.ps1`. The endpoint remains `StubCollector`; Task 004
+will introduce the real collector. See
+[`docs/tasks/003-selenium-browser-runtime.md`](docs/tasks/003-selenium-browser-runtime.md).
