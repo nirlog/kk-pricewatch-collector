@@ -4,8 +4,9 @@ Standalone Python collection service for [`nirlog/kk.pricewatch`](https://github
 Its only integration boundary is HTTP collector protocol `1.0`; it imports no Bitrix
 code and shares no database or filesystem with Bitrix.
 
-Version **0.4.0** adds the first generic Selenium single-price collector. It is not a
-browser-scenario engine and contains no competitor-specific code.
+Version **0.5.0** adds a deliberately small set of typed, pre-price browser actions to
+the generic Selenium collector. It is not a browser-scenario engine and contains no
+competitor-specific code.
 
 ## Local development
 
@@ -78,7 +79,7 @@ This displays installation/state/startup/health information, never token metadat
 Always provide an immutable release tag or commit explicitly:
 
 ```powershell
-.\deploy\windows\Update-Collector.ps1 -Ref 'v0.4.0'
+.\deploy\windows\Update-Collector.ps1 -Ref 'v0.5.0'
 ```
 
 A dirty tree is rejected. The updater records the old SHA, installs and smoke-checks
@@ -138,6 +139,23 @@ Send JSON to `POST /api/collectors/browser` with a bearer header:
   "options": {
     "browser": {
       "allowed_hosts": ["competitor.example"],
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": "#cookie-accept",
+          "timeout_seconds": 5,
+          "required": false
+        },
+        {
+          "type": "wait_for",
+          "by": "css",
+          "selector": ".cookie-overlay",
+          "state": "hidden",
+          "timeout_seconds": 5,
+          "required": false
+        }
+      ],
       "price": {
         "by": "css",
         "selector": ".product-price",
@@ -152,10 +170,19 @@ Send JSON to `POST /api/collectors/browser` with a bearer header:
 }
 ```
 
+Before the existing price extraction, the collector may execute up to ten predefined
+`click` and `wait_for` actions. Selectors are CSS or XPath; waits may target `present`,
+`visible`, or `hidden`. Required actions fail the item, while optional action timeouts
+are skipped. Each action timeout is 1--30 seconds and their total is at most 60 seconds.
+Every click is followed by final-URL validation.
+
 The collector supports one CSS or XPath price selector and extracts visible text or a
 configured attribute. It applies an exact-host/public-DNS baseline SSRF policy before
 navigation and checks the final redirect host. This is not complete DNS-rebinding
-protection. Protocol-level failures still use HTTP 200; protocol `1.0` is unchanged.
+protection. No action can accept a URL, script, Selenium method, or arbitrary expected
+condition. Full action semantics and exclusions are documented in
+[`docs/tasks/005-constrained-browser-actions.md`](docs/tasks/005-constrained-browser-actions.md).
+Protocol-level failures still use HTTP 200; protocol `1.0` is unchanged.
 
 ## Quality checks
 
@@ -164,7 +191,7 @@ python -m pytest
 ruff check .
 ruff format --check .
 mypy app
-docker build -t kk-pricewatch-collector:0.4.0 .
+docker build -t kk-pricewatch-collector:0.5.0 .
 ```
 
 CI additionally parses every PowerShell deployment script on Windows. Docker remains an
