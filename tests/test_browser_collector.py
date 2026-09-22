@@ -17,12 +17,28 @@ from app.contract.v1 import CollectorRequest
 
 
 class Element:
-    def __init__(self, text: str = "", attributes: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        text: str = "",
+        attributes: dict[str, str] | None = None,
+        on_click: Any | None = None,
+    ) -> None:
         self.text = text
         self.attributes = attributes or {}
+        self.on_click = on_click
 
     def get_attribute(self, name: str) -> str | None:
         return self.attributes.get(name)
+
+    def is_displayed(self) -> bool:
+        return True
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def click(self) -> None:
+        if self.on_click is not None:
+            self.on_click()
 
 
 class Driver:
@@ -86,6 +102,27 @@ class Factory:
             self.driver.quit()
 
 
+class ActionDriver(Driver):
+    def __init__(
+        self,
+        pages: dict[str, Element | Exception | str | list[Element | Exception]],
+        actions: dict[str, list[Element | Exception]],
+    ) -> None:
+        super().__init__(pages)
+        self.actions = actions
+        self.price_lookups = 0
+
+    def find_element(self, by: str, value: str) -> Element:
+        if value == ".price":
+            self.price_lookups += 1
+            return super().find_element(by, value)
+        outcomes = self.actions[self.visited[-1]]
+        outcome = outcomes.pop(0) if len(outcomes) > 1 else outcomes[0]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
 class ImmediateWait:
     def __init__(
         self,
@@ -131,6 +168,7 @@ def request(urls: list[str], **browser_overrides: object) -> CollectorRequest:
 @pytest.fixture(autouse=True)
 def immediate_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.collectors.browser.WebDriverWait", ImmediateWait)
+    monkeypatch.setattr("app.collectors.actions.WebDriverWait", ImmediateWait)
 
 
 def test_one_session_processes_multiple_items_in_order() -> None:
@@ -281,3 +319,101 @@ def test_session_startup_failure_is_sanitized_global_failure() -> None:
         "message": "Collector failed.",
     }
     assert "secret" not in response.error.message
+
+
+def test_required_action_failure_is_isolated_between_items() -> None:
+    urls = [f"https://example.com/{name}" for name in ("first", "second", "third")]
+    driver = ActionDriver(
+        {url: Element("10,00") for url in urls},
+        {
+            urls[0]: [Element()],
+            urls[1]: [NoSuchElementException("private DOM detail")],
+            urls[2]: [Element()],
+        },
+    )
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
+        request(
+            urls,
+            actions=[{"type": "click", "by": "css", "selector": "#accept"}],
+        )
+    )
+
+    assert response.success is True
+    assert [item.id for item in response.items] == ["0", "1", "2"]
+    assert [item.success for item in response.items] == [True, False, True]
+    assert response.items[1].error.model_dump() == {
+        "code": "ACTION_FAILED",
+        "message": "Required browser action could not be completed.",
+    }
+    assert driver.quit_calls == 1
+
+
+def test_optional_action_timeout_continues_to_price() -> None:
+    url = "https://example.com/product"
+    driver = ActionDriver(
+        {url: Element("25,00")}, {url: [NoSuchElementException("private DOM detail")]}
+    )
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
+        request(
+            [url],
+            actions=[
+                {
+                    "type": "click",
+                    "by": "css",
+                    "selector": "#optional",
+                    "required": False,
+                }
+            ],
+        )
+    )
+    assert response.items[0].success is True
+    assert driver.price_lookups == 1
+
+
+@pytest.mark.parametrize(
+    ("action_error", "code"),
+    [
+        (InvalidSelectorException("private selector detail"), "BROWSER_CONFIGURATION_ERROR"),
+        (InvalidSessionIdException("private session detail"), "COLLECTOR_ERROR"),
+    ],
+)
+def test_action_configuration_and_session_errors_are_sanitized_global_failures(
+    action_error: Exception, code: str
+) -> None:
+    url = "https://example.com/product"
+    driver = ActionDriver({url: Element("25,00")}, {url: [action_error]})
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
+        request([url], actions=[{"type": "click", "by": "css", "selector": "#accept"}])
+    )
+    assert response.success is False
+    assert response.error.code == code
+    assert "private" not in response.error.message
+
+
+@pytest.mark.parametrize(
+    ("destination", "success"),
+    [
+        ("https://example.com/product", True),
+        ("https://shop.example.com/next", True),
+        ("https://attacker.example/next", False),
+    ],
+)
+def test_click_redirect_is_validated_before_price_extraction(
+    destination: str, success: bool
+) -> None:
+    url = "https://example.com/product"
+    driver = ActionDriver({url: Element("25,00")}, {url: []})
+    driver.actions[url] = [Element(on_click=lambda: setattr(driver, "current_url", destination))]
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
+        request(
+            [url],
+            allowed_hosts=["example.com", "shop.example.com"],
+            actions=[{"type": "click", "by": "css", "selector": "#continue"}],
+        )
+    )
+    assert response.items[0].success is success
+    if success:
+        assert driver.price_lookups == 1
+    else:
+        assert response.items[0].error.code == "INVALID_URL"
+        assert driver.price_lookups == 0
