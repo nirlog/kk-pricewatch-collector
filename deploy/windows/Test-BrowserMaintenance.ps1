@@ -132,6 +132,9 @@ try {
     Assert-True ($removals.Count -eq 0) 'Cleanup attempted to remove a reparse point.'
 
     Write-Host 'Browser maintenance control-flow tests passed.'
+} catch {
+    Write-Host "::error title=Browser maintenance control-flow test failed::$($_.Exception.Message)"
+    throw
 } finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force
 }
