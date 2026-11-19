@@ -2,10 +2,14 @@
 param(
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string] $Ref,
     [string] $RepositoryPath = 'C:\Services\kk-pricewatch-collector',
-    [string] $DataPath = 'C:\ProgramData\KKPriceWatchCollector'
+    [string] $DataPath = 'C:\ProgramData\KKPriceWatchCollector',
+    [Parameter(Mandatory)] [string] $ChromeBinary,
+    [switch] $RepairBrowserRuntime
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+Import-Module (Join-Path $PSScriptRoot 'BrowserRuntime.psm1') -Force
 
 function Assert-Administrator {
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -39,13 +43,27 @@ function Wait-Health {
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Collector did not become healthy within 60 seconds.'
 }
+function Wait-ServiceStopped {
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $service = Get-Service -Name 'KKPriceWatchCollector' -ErrorAction Stop
+        if ($service.Status -eq 'Stopped') { return }
+        Start-Sleep -Seconds 1
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Collector service did not reach Stopped state within 30 seconds.'
+}
 
 Assert-Administrator
 $RepositoryPath = [IO.Path]::GetFullPath($RepositoryPath)
+$DataPath = [IO.Path]::GetFullPath($DataPath)
+$ChromeBinary = [IO.Path]::GetFullPath($ChromeBinary)
 $pythonExe = Join-Path $RepositoryPath '.venv\Scripts\python.exe'
-$serviceExe = Join-Path ([IO.Path]::GetFullPath($DataPath)) 'service\KKPriceWatchCollector.exe'
+$serviceExe = Join-Path $DataPath 'service\KKPriceWatchCollector.exe'
+$browserDataPath = Join-Path $DataPath 'browser'
 if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) { throw "Virtual environment not found: $pythonExe" }
 if (-not (Test-Path -LiteralPath $serviceExe -PathType Leaf)) { throw "Service wrapper not found: $serviceExe" }
+if (-not (Test-Path -LiteralPath $ChromeBinary -PathType Leaf)) { throw "Chrome binary not found: $ChromeBinary" }
+if (-not (Test-Path -LiteralPath $browserDataPath -PathType Container)) { throw "Browser data directory not found: $browserDataPath" }
 if (-not (Get-Service -Name 'KKPriceWatchCollector' -ErrorAction SilentlyContinue)) { throw 'Collector service is not installed.' }
 $status = (& git -C $RepositoryPath status --porcelain)
 if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the Git working tree.' }
@@ -55,10 +73,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Unable to determine the current Git commit.' }
 
 & $serviceExe stop
 if ($LASTEXITCODE -ne 0) { throw 'Unable to stop the Collector service.' }
+Wait-ServiceStopped
 try {
     Invoke-Git fetch origin -- $Ref
     Invoke-Git checkout --detach FETCH_HEAD
     Install-Package
+    Remove-OrphanedBrowserProfiles -BrowserDataPath $browserDataPath
+    Invoke-BrowserRuntimeMaintenance -RepositoryPath $RepositoryPath -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath -Repair:$RepairBrowserRuntime
     & $serviceExe start
     if ($LASTEXITCODE -ne 0) { throw 'Unable to start the updated Collector service.' }
     Wait-Health
@@ -68,8 +89,11 @@ try {
     Write-Warning "Update failed; rolling back to $previousSha. Error: $updateError"
     try {
         & $serviceExe stop | Out-Null
+        Wait-ServiceStopped
         Invoke-Git checkout --detach $previousSha
         Install-Package
+        Remove-OrphanedBrowserProfiles -BrowserDataPath $browserDataPath
+        Invoke-BrowserRuntimeMaintenance -RepositoryPath $RepositoryPath -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath
         & $serviceExe start
         if ($LASTEXITCODE -ne 0) { throw 'Unable to start the rolled-back Collector service.' }
         Wait-Health

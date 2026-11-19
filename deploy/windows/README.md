@@ -40,7 +40,8 @@ operator-verified WinSW executable:
 .\deploy\windows\Install-CollectorService.ps1 `
   -WinSWPath 'C:\Installers\WinSW-x64.exe' `
   -RepositoryPath 'C:\Services\kk-pricewatch-collector' `
-  -Python 'C:\Program Files\Python313\python.exe'
+  -Python 'C:\Program Files\Python313\python.exe' `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 .\deploy\windows\Get-CollectorStatus.ps1
 ```
 
@@ -75,15 +76,20 @@ Success is reported only after exact local `/health` verification.
 A target ref is mandatory; use an immutable tag or commit SHA:
 
 ```powershell
-.\deploy\windows\Update-Collector.ps1 -Ref 'v0.2.0'
+.\deploy\windows\Update-Collector.ps1 `
+  -Ref 'v0.5.1' `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 ```
 
 The updater refuses a dirty checkout, records the current SHA, stops the service,
 fetches and checks out the requested ref in detached mode, installs into the existing
-virtual environment, compiles/imports the app, restarts, and checks health. Failure
-checks out and reinstalls the recorded SHA, restarts it, verifies health, and returns a
-non-zero result describing whether rollback succeeded. It never uses `git reset
---hard` and never removes persistent data.
+virtual environment, removes direct stale `browser\chrome-*` profile directories,
+verifies the browser runtime offline, restarts, and checks health. Offline failure
+causes rollback. Driver provisioning is permitted only when the operator supplies
+`-RepairBrowserRuntime`; the updater then provisions once and requires a final
+offline verification before startup. Rollback reinstalls the recorded SHA and also
+requires offline browser verification before restart. It never uses `git reset
+--hard` and never removes persistent secrets, logs, or Selenium cache data.
 
 ## Secret rotation
 
@@ -183,6 +189,45 @@ Directly exercise the same production factory in both explicit modes:
   -Mode Offline
 ```
 
+For routine verification and repair, prefer the maintenance command. It ignores
+inherited Collector token variables while running its local browser smoke. Verification
+never downloads. Repair requires the installed service to be stopped:
+
+```powershell
+.\deploy\windows\Repair-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+
+Stop-Service KKPriceWatchCollector
+.\deploy\windows\Repair-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -Repair
+Start-Service KKPriceWatchCollector
+```
+
+The repair command always tries `Offline` first. When it already works, no
+provisioning occurs. With `-Repair`, an initial failure permits one explicit
+`ProvisionDriver` run and then requires another `Offline` run. The service
+configuration continues to set `SE_OFFLINE=true`, so application requests never
+download a driver.
+
+Abnormal termination can leave `browser\chrome-*` profiles. With the service
+stopped, remove only these direct, non-reparse-point children:
+
+```powershell
+.\deploy\windows\Repair-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -CleanupOrphanProfiles `
+  -CleanupWhatIf
+
+.\deploy\windows\Repair-BrowserRuntime.ps1 `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  -CleanupOrphanProfiles
+```
+
+Dry-run reports candidates without deleting. Cleanup never scans outside the browser
+directory, follows reparse points, removes `selenium-cache`, or removes the browser
+directory itself. Updates perform the same cleanup only after stopping the service.
+
 To migrate an installed Task 002 service, back up the retained token, check out the
 reviewed 0.3.0 release, and run `Uninstall-CollectorService.ps1` **without** `-PurgeData`.
 Then rerun the installer above. With no `-ProtectedTokenFile`, it reuses
@@ -190,8 +235,11 @@ Then rerun the installer above. With no `-ProtectedTokenFile`, it reuses
 and verifies preflight and health. Confirm Running/Automatic with the status script.
 This flow preserves service data and the `NT AUTHORITY\LocalService` identity. Never
 use `-PurgeData` for migration or grant LocalService access to an Administrator profile.
-If Chrome is updated later, stop the Collector, run `ProvisionDriver` and then `Offline`,
-and only restart after offline verification succeeds.
+If Chrome is updated later, stop the Collector, run the repair command with `-Repair`,
+and only restart after its final offline verification succeeds.
 
 Selenium uses official Selenium Manager. Playwright, webdriver-manager, browser evasion,
 CAPTCHA handling, proxies, and competitor scraping remain absent.
+
+`/health` intentionally remains browser-free and returns only `{"status":"ok"}`.
+Use offline runtime verification to detect Chrome/ChromeDriver incompatibility.

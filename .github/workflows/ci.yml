@@ -51,6 +51,9 @@ jobs:
       - name: Exercise Python runtime resolution
         shell: pwsh
         run: ./deploy/windows/Test-CollectorRuntime.ps1 -Python (Get-Command python).Source
+      - name: Exercise browser maintenance control flow
+        shell: pwsh
+        run: ./deploy/windows/Test-BrowserMaintenance.ps1
       - name: Execute update import smoke command
         shell: pwsh
         run: |

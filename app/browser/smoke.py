@@ -8,6 +8,21 @@ from app.browser.errors import BrowserRuntimeError
 from app.settings import Settings
 
 
+def browser_runtime_settings(
+    chrome_binary: Path,
+    browser_data_dir: Path,
+    selenium_cache_dir: Path,
+) -> Settings:
+    """Build smoke-only settings without reading production token variables."""
+    return Settings(
+        _env_prefix="KK_PRICEWATCH_BROWSER_SMOKE_INTERNAL_",
+        api_token="browser-smoke-not-an-api-credential",
+        chrome_binary=chrome_binary,
+        browser_data_dir=browser_data_dir,
+        selenium_cache_dir=selenium_cache_dir,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a local-only Chrome runtime smoke test")
     parser.add_argument("--chrome-binary", type=Path, required=True)
@@ -15,11 +30,10 @@ def main() -> int:
     parser.add_argument("--selenium-cache-dir", type=Path, required=True)
     args = parser.parse_args()
     try:
-        settings = Settings(
-            api_token="browser-smoke-not-an-api-credential",
-            chrome_binary=args.chrome_binary,
-            browser_data_dir=args.browser_data_dir,
-            selenium_cache_dir=args.selenium_cache_dir,
+        settings = browser_runtime_settings(
+            args.chrome_binary,
+            args.browser_data_dir,
+            args.selenium_cache_dir,
         )
         BrowserSessionFactory(settings).preflight()
     except (BrowserRuntimeError, ValueError) as exc:

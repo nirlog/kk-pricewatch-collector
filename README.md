@@ -4,9 +4,9 @@ Standalone Python collection service for [`nirlog/kk.pricewatch`](https://github
 Its only integration boundary is HTTP collector protocol `1.0`; it imports no Bitrix
 code and shares no database or filesystem with Bitrix.
 
-Version **0.5.0** adds a deliberately small set of typed, pre-price browser actions to
-the generic Selenium collector. It is not a browser-scenario engine and contains no
-competitor-specific code.
+Version **0.5.1** hardens maintenance of the offline Selenium runtime after Chrome
+updates and abnormal browser termination. The collector protocol and constrained
+browser-action behavior remain unchanged.
 
 ## Local development
 
@@ -79,7 +79,9 @@ This displays installation/state/startup/health information, never token metadat
 Always provide an immutable release tag or commit explicitly:
 
 ```powershell
-.\deploy\windows\Update-Collector.ps1 -Ref 'v0.5.0'
+.\deploy\windows\Update-Collector.ps1 `
+  -Ref 'v0.5.1' `
+  -ChromeBinary 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 ```
 
 A dirty tree is rejected. The updater records the old SHA, installs and smoke-checks
@@ -191,7 +193,7 @@ python -m pytest
 ruff check .
 ruff format --check .
 mypy app
-docker build -t kk-pricewatch-collector:0.5.0 .
+docker build -t kk-pricewatch-collector:0.5.1 .
 ```
 
 CI additionally parses every PowerShell deployment script on Windows. Docker remains an
@@ -207,8 +209,8 @@ machine-wide Google Chrome. It creates an isolated temporary profile per session
 Selenium Manager is strictly offline/cache-only in the WinSW service and `/health` stays
 lightweight. Installation first provisions a matching ChromeDriver into ProgramData,
 then proves it works in offline mode before registering the service. After an operator
-updates Chrome, rerun driver provisioning before restarting the Collector. Run the same
-production browser path manually with `deploy/windows/Test-BrowserRuntime.ps1 -Mode
-ProvisionDriver`, followed by `-Mode Offline`. The endpoint now uses
-`BrowserCollector`; the stub remains a deterministic test helper. See
-[`docs/tasks/003-selenium-browser-runtime.md`](docs/tasks/003-selenium-browser-runtime.md).
+updates Chrome, stop the service and use `Repair-BrowserRuntime.ps1 -Repair`. That
+command first verifies the existing cache offline, provisions a matching driver only
+after failure, and verifies offline again. The endpoint uses `BrowserCollector`; the
+stub remains a deterministic test helper. See
+[`docs/tasks/006-browser-runtime-hardening.md`](docs/tasks/006-browser-runtime-hardening.md).
