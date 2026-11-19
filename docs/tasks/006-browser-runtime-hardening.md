@@ -46,9 +46,12 @@ verification before service startup. Without `-RepairBrowserRuntime`, failure en
 the existing rollback path. With the switch, the updater may explicitly provision a
 matching driver and must then pass offline verification.
 
-Rollback reinstalls the recorded commit, repeats the narrowly scoped profile cleanup,
-and verifies the browser offline before restarting and checking health. A browser
-runtime that remains unusable cannot be reported as a successful update or rollback.
+Rollback reinstalls the recorded commit and package, then restores the previous service
+and verifies `/health`. It deliberately does not invoke browser verification from the
+previous checkout, so a pre-existing Chrome/ChromeDriver mismatch or legacy smoke
+implementation cannot block restoration of service availability. Browser-profile
+cleanup failure and possible browser degradation are reported as warnings, while the
+original target update remains failed. Rollback never provisions a driver.
 
 ## Orphan profile cleanup
 
@@ -69,5 +72,7 @@ Python tests cover inherited token sources, secret-free output, unchanged produc
 token validation, deployment assets, and version 0.5.1. Windows CI imports the shared
 PowerShell module and exercises verification-only failure, successful repair, failed
 final verification, environment restoration, dry-run cleanup, exact direct-child
-cleanup, unrelated data preservation, and reparse-point escape prevention without
-Chrome or network access.
+cleanup, unrelated data preservation, reparse-point escape prevention, and service-first
+update rollback. Regression coverage also locks the rollback documentation contract so
+previous-service restoration remains independent of browser cleanup failures and legacy
+browser smoke verification, without requiring Chrome or network access.

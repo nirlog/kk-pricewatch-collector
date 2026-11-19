@@ -196,6 +196,17 @@ def test_update_rollback_restores_service_without_legacy_browser_smoke() -> None
     assert "incorrectly report update success" in regression
 
 
+def test_task_006_documents_service_first_rollback_contract() -> None:
+    task = Path("docs/tasks/006-browser-runtime-hardening.md").read_text(encoding="utf-8")
+    assert "restores the previous service" in task
+    assert "verifies `/health`" in task
+    assert "does not invoke browser verification from the previous checkout" in task
+    assert "original target update remains failed" in task
+    assert "Rollback never provisions a driver." in task
+    assert "verifies the browser offline before restarting" not in task
+    assert "successful update or rollback" not in task
+
+
 def test_runtime_cleanup_is_narrowly_scoped() -> None:
     runtime = (WINDOWS_DEPLOYMENT / "BrowserRuntime.psm1").read_text(encoding="utf-8")
     assert "Get-ChildItem -LiteralPath $browserRoot -Directory" in runtime
