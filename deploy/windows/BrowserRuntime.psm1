@@ -87,7 +87,9 @@ function Remove-OrphanedBrowserProfiles {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $BrowserDataPath,
-        [switch] $WhatIf
+        [switch] $WhatIf,
+        [scriptblock] $ChildProvider,
+        [scriptblock] $RemoveProfile
     )
 
     $browserRoot = [IO.Path]::GetFullPath($BrowserDataPath).TrimEnd(
@@ -98,7 +100,12 @@ function Remove-OrphanedBrowserProfiles {
         throw "Browser data directory does not exist: $browserRoot"
     }
 
-    foreach ($child in Get-ChildItem -LiteralPath $browserRoot -Directory -Force) {
+    if ($ChildProvider) {
+        $children = @(& $ChildProvider $browserRoot)
+    } else {
+        $children = @(Get-ChildItem -LiteralPath $browserRoot -Directory -Force)
+    }
+    foreach ($child in $children) {
         if ($child.Name -notmatch '^chrome-[^\\/]+$') { continue }
         $parent = [IO.Path]::GetFullPath($child.Parent.FullName).TrimEnd(
             [IO.Path]::DirectorySeparatorChar,
@@ -115,7 +122,11 @@ function Remove-OrphanedBrowserProfiles {
             Write-Host "Would remove orphan browser profile: $($child.Name)"
             continue
         }
-        Remove-Item -LiteralPath $child.FullName -Recurse -Force
+        if ($RemoveProfile) {
+            & $RemoveProfile $child.FullName
+        } else {
+            Remove-Item -LiteralPath $child.FullName -Recurse -Force
+        }
         Write-Host "Removed orphan browser profile: $($child.Name)"
     }
 }

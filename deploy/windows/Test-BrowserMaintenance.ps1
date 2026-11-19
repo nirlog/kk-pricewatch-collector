@@ -93,8 +93,6 @@ try {
     New-Item -ItemType Directory -Path $stale, $dryRun, $unrelated, $nested, $outside | Out-Null
     Set-Content -LiteralPath (Join-Path $browserPath 'chrome-file') -Value 'keep'
     Set-Content -LiteralPath (Join-Path $cachePath 'driver-marker') -Value 'keep'
-    $junction = Join-Path $browserPath 'chrome-junction'
-    New-Item -ItemType Junction -Path $junction -Target $outside | Out-Null
 
     Remove-OrphanedBrowserProfiles -BrowserDataPath $browserPath -WhatIf
     Assert-True (Test-Path -LiteralPath $dryRun -PathType Container) 'Dry-run removed a profile.'
@@ -106,10 +104,32 @@ try {
     Assert-True (Test-Path -LiteralPath $nested -PathType Container) 'Nested directory was scanned.'
     Assert-True (Test-Path -LiteralPath (Join-Path $browserPath 'chrome-file') -PathType Leaf) 'Matching file was removed.'
     Assert-True (Test-Path -LiteralPath (Join-Path $cachePath 'driver-marker') -PathType Leaf) 'Selenium cache was modified.'
-    if ($PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows) {
-        Assert-True ($null -ne (Get-Item -LiteralPath $junction -Force -ErrorAction SilentlyContinue)) 'Reparse point was removed.'
-    }
     Assert-True (Test-Path -LiteralPath $outside -PathType Container) 'Cleanup escaped the browser directory.'
+
+    $removals = [Collections.Generic.List[string]]::new()
+    $recordRemoval = { param($Path) [void] $removals.Add($Path) }
+    $outsideChild = [PSCustomObject] @{
+        Name = 'chrome-escape'
+        FullName = (Join-Path $outside 'chrome-escape')
+        Parent = [PSCustomObject] @{ FullName = $outside }
+        Attributes = [IO.FileAttributes]::Directory
+    }
+    try {
+        Remove-OrphanedBrowserProfiles -BrowserDataPath $browserPath -ChildProvider { $outsideChild } -RemoveProfile $recordRemoval
+        throw 'Cleanup accepted a child outside the browser data directory.'
+    } catch {
+        Assert-True ($_.Exception.Message -eq 'Refusing to clean a browser profile outside the browser data directory.') 'Outside-child rejection was not preserved.'
+    }
+    Assert-True ($removals.Count -eq 0) 'Cleanup attempted to remove an outside path.'
+
+    $reparseChild = [PSCustomObject] @{
+        Name = 'chrome-reparse'
+        FullName = (Join-Path $browserPath 'chrome-reparse')
+        Parent = [PSCustomObject] @{ FullName = $browserPath }
+        Attributes = ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)
+    }
+    Remove-OrphanedBrowserProfiles -BrowserDataPath $browserPath -ChildProvider { $reparseChild } -RemoveProfile $recordRemoval
+    Assert-True ($removals.Count -eq 0) 'Cleanup attempted to remove a reparse point.'
 
     Write-Host 'Browser maintenance control-flow tests passed.'
 } finally {
