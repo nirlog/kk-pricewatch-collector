@@ -205,6 +205,7 @@ def test_task_006_documents_service_first_rollback_contract() -> None:
     assert "verifies the browser offline before restarting" not in task
     assert "successful update or rollback" not in task
 
+
 def test_runtime_cleanup_is_narrowly_scoped() -> None:
     runtime = (WINDOWS_DEPLOYMENT / "BrowserRuntime.psm1").read_text(encoding="utf-8")
     assert "Get-ChildItem -LiteralPath $browserRoot -Directory" in runtime
