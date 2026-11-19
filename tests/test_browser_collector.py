@@ -6,7 +6,9 @@ import pytest
 from selenium.common.exceptions import (
     InvalidSelectorException,
     InvalidSessionIdException,
+    NoSuchDriverException,
     NoSuchElementException,
+    NoSuchWindowException,
     StaleElementReferenceException,
     TimeoutException,
     WebDriverException,
@@ -327,7 +329,7 @@ def test_required_action_failure_is_isolated_between_items() -> None:
         {url: Element("10,00") for url in urls},
         {
             urls[0]: [Element()],
-            urls[1]: [NoSuchElementException("private DOM detail")],
+            urls[1]: [TimeoutException("private timeout detail")],
             urls[2]: [Element()],
         },
     )
@@ -345,13 +347,14 @@ def test_required_action_failure_is_isolated_between_items() -> None:
         "code": "ACTION_FAILED",
         "message": "Required browser action could not be completed.",
     }
+    assert "private timeout detail" not in response.model_dump_json()
     assert driver.quit_calls == 1
 
 
 def test_optional_action_timeout_continues_to_price() -> None:
     url = "https://example.com/product"
     driver = ActionDriver(
-        {url: Element("25,00")}, {url: [NoSuchElementException("private DOM detail")]}
+        {url: Element("25,00")}, {url: [TimeoutException("private timeout detail")]}
     )
     response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
         request(
@@ -367,27 +370,60 @@ def test_optional_action_timeout_continues_to_price() -> None:
         )
     )
     assert response.items[0].success is True
+    assert response.items[0].price == "25.00"
+    assert "private timeout detail" not in response.model_dump_json()
     assert driver.price_lookups == 1
 
 
+@pytest.mark.parametrize("required", [True, False], ids=["required", "optional"])
 @pytest.mark.parametrize(
     ("action_error", "code"),
     [
         (InvalidSelectorException("private selector detail"), "BROWSER_CONFIGURATION_ERROR"),
         (InvalidSessionIdException("private session detail"), "COLLECTOR_ERROR"),
+        (NoSuchDriverException("private driver detail"), "COLLECTOR_ERROR"),
+        (NoSuchWindowException("private window detail"), "COLLECTOR_ERROR"),
+        (WebDriverException("private WebDriver detail"), "COLLECTOR_ERROR"),
     ],
 )
-def test_action_configuration_and_session_errors_are_sanitized_global_failures(
-    action_error: Exception, code: str
+def test_action_webdriver_errors_are_sanitized_global_failures(
+    action_error: Exception, code: str, required: bool
 ) -> None:
     url = "https://example.com/product"
     driver = ActionDriver({url: Element("25,00")}, {url: [action_error]})
     response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
-        request([url], actions=[{"type": "click", "by": "css", "selector": "#accept"}])
+        request(
+            [url],
+            actions=[{"type": "click", "by": "css", "selector": "#accept", "required": required}],
+        )
     )
     assert response.success is False
     assert response.error.code == code
-    assert "private" not in response.error.message
+    assert response.items == []
+    assert "private" not in response.model_dump_json()
+    assert driver.price_lookups == 0
+    assert driver.quit_calls == 1
+
+
+def test_optional_click_timeout_validates_redirect_before_price() -> None:
+    url = "https://example.com/product"
+    driver = ActionDriver({url: Element("25,00")}, {url: []})
+
+    def redirect_then_timeout() -> None:
+        driver.current_url = "https://attacker.example/next"
+        raise TimeoutException("private timeout detail")
+
+    driver.actions[url] = [Element(on_click=redirect_then_timeout)]
+    response = BrowserCollector(Factory(driver), lambda _: ["93.184.216.34"]).collect(
+        request(
+            [url],
+            actions=[{"type": "click", "by": "css", "selector": "#optional", "required": False}],
+        )
+    )
+
+    assert response.success is True
+    assert response.items[0].error.code == "INVALID_URL"
+    assert driver.price_lookups == 0
 
 
 @pytest.mark.parametrize(

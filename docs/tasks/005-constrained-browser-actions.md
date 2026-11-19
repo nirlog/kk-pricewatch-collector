@@ -56,13 +56,15 @@ be clickable and then clicks it.
 
 ## Required, optional, and error semantics
 
-A timeout or item-local WebDriver error in a required action returns item error
+A timeout in a required action returns item error
 `ACTION_FAILED` with the fixed message `Required browser action could not be
-completed.` Processing then continues with the next item. The same safe, item-local
-failure in an optional action is skipped and action processing continues.
+completed.` Processing then continues with the next item. An optional action that
+times out is skipped and action processing continues. Missing and stale elements
+are handled within the explicit wait.
 
-An invalid Selenium selector is a sanitized global `BROWSER_CONFIGURATION_ERROR`. A
-lost session/window or other session-fatal failure is global `COLLECTOR_ERROR`.
+An invalid Selenium selector is a sanitized global `BROWSER_CONFIGURATION_ERROR`.
+Invalid sessions, missing drivers or windows, and other WebDriver errors that
+escape the wait are global `COLLECTOR_ERROR`, even for optional actions.
 Selenium exception text is never included in protocol output. Existing `INVALID_URL`,
 `PAGE_LOAD_FAILED`, `PRICE_NOT_FOUND`, and `PRICE_INVALID` behavior remains unchanged.
 
@@ -70,7 +72,8 @@ Selenium exception text is never included in protocol output. Existing `INVALID_
 
 Actions cannot directly navigate. A click can nevertheless cause navigation, so the
 collector applies the existing exact-host URL policy to `driver.current_url` after
-every successful click. A disallowed redirect produces item error `INVALID_URL` before
+every successful click and after a timed-out optional click. A disallowed redirect
+produces item error `INVALID_URL` before
 any subsequent action or price extraction. Navigation to another explicitly allowed
 host continues normally. The existing public-DNS pre-navigation check remains a
 baseline rather than a claim of complete DNS-rebinding protection.

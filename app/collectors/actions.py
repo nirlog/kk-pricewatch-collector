@@ -11,7 +11,6 @@ from selenium.common.exceptions import (
     NoSuchWindowException,
     StaleElementReferenceException,
     TimeoutException,
-    WebDriverException,
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
@@ -48,7 +47,7 @@ class BrowserActionExecutor:
                 raise ActionConfigurationError from exc
             except (InvalidSessionIdException, NoSuchDriverException, NoSuchWindowException):
                 raise
-            except (TimeoutException, WebDriverException) as exc:
+            except TimeoutException as exc:
                 if action.required:
                     raise RequiredActionError from exc
                 # A click can navigate before WebDriver reports a local failure. Checking
