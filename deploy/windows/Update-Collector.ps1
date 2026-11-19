@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'BrowserRuntime.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'UpdateRollback.psm1') -Force
 
 function Assert-Administrator {
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -90,13 +91,16 @@ try {
     try {
         & $serviceExe stop | Out-Null
         Wait-ServiceStopped
-        Invoke-Git checkout --detach $previousSha
-        Install-Package
-        Remove-OrphanedBrowserProfiles -BrowserDataPath $browserDataPath
-        Invoke-BrowserRuntimeMaintenance -RepositoryPath $RepositoryPath -Python $pythonExe -ChromeBinary $ChromeBinary -DataPath $DataPath
-        & $serviceExe start
-        if ($LASTEXITCODE -ne 0) { throw 'Unable to start the rolled-back Collector service.' }
-        Wait-Health
+        Invoke-CollectorUpdateRollback `
+            -RestoreCheckout { Invoke-Git checkout --detach $previousSha } `
+            -InstallPreviousPackage { Install-Package } `
+            -RemoveOrphanedProfiles { Remove-OrphanedBrowserProfiles -BrowserDataPath $browserDataPath } `
+            -StartPreviousService {
+                & $serviceExe start
+                if ($LASTEXITCODE -ne 0) { throw 'Unable to start the rolled-back Collector service.' }
+            } `
+            -WaitForPreviousHealth { Wait-Health }
+        Write-Warning 'The previous Collector is healthy. Its browser runtime was not verified during rollback and may remain degraded.'
     } catch {
         $rollbackError = $_.Exception.Message
         throw "Update failed. Rollback attempted for $previousSha but did not complete: $rollbackError. Original error: $updateError"

@@ -87,9 +87,45 @@ virtual environment, removes direct stale `browser\chrome-*` profile directories
 verifies the browser runtime offline, restarts, and checks health. Offline failure
 causes rollback. Driver provisioning is permitted only when the operator supplies
 `-RepairBrowserRuntime`; the updater then provisions once and requires a final
-offline verification before startup. Rollback reinstalls the recorded SHA and also
-requires offline browser verification before restart. It never uses `git reset
+offline verification before startup. Rollback reinstalls the recorded SHA and package,
+then starts the previous service and verifies `/health`. It deliberately does not run
+browser verification from the previous checkout: a pre-existing browser mismatch or a
+legacy smoke implementation must not prevent restoration of service availability.
+Profile-cleanup failure is reported as a warning and browser degradation may remain,
+while the original update still fails. Rollback never provisions a driver, even when
+`-RepairBrowserRuntime` authorized repair of the target. It never uses `git reset
 --hard` and never removes persistent secrets, logs, or Selenium cache data.
+
+### One-time bootstrap from 0.5.0
+
+The updater installed in 0.5.0 has neither `BrowserRuntime.psm1` nor the
+`ChromeBinary` parameter. Do **not** use that old script to accept 0.5.1. From an
+elevated PowerShell session, fetch the reviewed immutable 0.5.1 ref, preserve the
+installed SHA outside the checkout, and stage all three 0.5.1 update assets together:
+
+```powershell
+$repo = 'C:\\Services\\kk-pricewatch-collector'
+$stage = 'C:\\ProgramData\\KKPriceWatchCollector\\update-0.5.1'
+$archive = Join-Path $env:TEMP 'kk-pricewatch-update-0.5.1.zip'
+$previous = (& git -C $repo rev-parse HEAD).Trim()
+$previous | Set-Content 'C:\\ProgramData\\KKPriceWatchCollector\\pre-0.5.1-sha.txt'
+git -C $repo fetch origin -- v0.5.1
+$target = (& git -C $repo rev-parse FETCH_HEAD).Trim()
+New-Item -ItemType Directory -Force $stage | Out-Null
+git -C $repo archive --format=zip --output=$archive $target `
+  deploy/windows/Update-Collector.ps1 deploy/windows/BrowserRuntime.psm1 `
+  deploy/windows/UpdateRollback.psm1
+Expand-Archive -LiteralPath $archive -DestinationPath $stage -Force
+& "$stage\\deploy\\windows\\Update-Collector.ps1" -RepositoryPath $repo `
+  -Ref $target -ChromeBinary 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+```
+
+Use `-RepairBrowserRuntime` on that final command only when the maintenance window
+explicitly permits Selenium Manager to provision a matching driver. The staged 0.5.1
+updater performs target browser acceptance before service startup and automatically
+restores `$previous`, its package, service startup, and `/health` on failure. Keep the
+saved SHA and staged assets until acceptance completes; confirm the reported checked-out
+SHA and run `Get-CollectorStatus.ps1` before declaring the upgrade successful.
 
 ## Secret rotation
 

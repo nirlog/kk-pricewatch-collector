@@ -181,6 +181,21 @@ def test_update_requires_explicit_browser_repair_and_verifies_before_start() -> 
     )
 
 
+def test_update_rollback_restores_service_without_legacy_browser_smoke() -> None:
+    updater = (WINDOWS_DEPLOYMENT / "Update-Collector.ps1").read_text(encoding="utf-8")
+    rollback = (WINDOWS_DEPLOYMENT / "UpdateRollback.psm1").read_text(encoding="utf-8")
+    regression = (WINDOWS_DEPLOYMENT / "Test-UpdateRollback.ps1").read_text(encoding="utf-8")
+    assert "Invoke-CollectorUpdateRollback" in updater
+    assert "StartPreviousService" in rollback
+    assert "WaitForPreviousHealth" in rollback
+    assert "Invoke-BrowserRuntimeMaintenance" not in rollback
+    assert "app.browser.smoke" not in rollback
+    assert "start-previous" in regression
+    assert "health-previous" in regression
+    assert "simulated browser cleanup failure" in regression
+    assert "incorrectly report update success" in regression
+
+
 def test_runtime_cleanup_is_narrowly_scoped() -> None:
     runtime = (WINDOWS_DEPLOYMENT / "BrowserRuntime.psm1").read_text(encoding="utf-8")
     assert "Get-ChildItem -LiteralPath $browserRoot -Directory" in runtime

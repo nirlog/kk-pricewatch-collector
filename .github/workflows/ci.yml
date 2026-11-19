@@ -54,6 +54,9 @@ jobs:
       - name: Exercise browser maintenance control flow
         shell: pwsh
         run: ./deploy/windows/Test-BrowserMaintenance.ps1
+      - name: Exercise update rollback control flow
+        shell: pwsh
+        run: ./deploy/windows/Test-UpdateRollback.ps1
       - name: Execute update import smoke command
         shell: pwsh
         run: |
