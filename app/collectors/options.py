@@ -3,12 +3,47 @@
 import ipaddress
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, StringConstraints, field_validator, model_validator
+from pydantic import Field, StrictBool, StringConstraints, field_validator, model_validator
 
 from app.contract.v1 import CurrencyCode, StrictModel
 
 Selector = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=2048)]
 AttributeName = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=256)]
+ActionTimeout = Annotated[int, Field(strict=True, ge=1, le=30)]
+
+
+class ClickAction(StrictModel):
+    type: Literal["click"]
+    by: Literal["css", "xpath"]
+    selector: Selector
+    timeout_seconds: ActionTimeout = 5
+    required: StrictBool = True
+
+    @field_validator("selector")
+    @classmethod
+    def reject_blank_selector(cls, selector: str) -> str:
+        if not selector.strip():
+            raise ValueError("selector must not be blank")
+        return selector
+
+
+class WaitForAction(StrictModel):
+    type: Literal["wait_for"]
+    by: Literal["css", "xpath"]
+    selector: Selector
+    state: Literal["present", "visible", "hidden"]
+    timeout_seconds: ActionTimeout = 5
+    required: StrictBool = True
+
+    @field_validator("selector")
+    @classmethod
+    def reject_blank_selector(cls, selector: str) -> str:
+        if not selector.strip():
+            raise ValueError("selector must not be blank")
+        return selector
+
+
+BrowserAction = Annotated[ClickAction | WaitForAction, Field(discriminator="type")]
 
 
 class PriceSelector(StrictModel):
@@ -35,6 +70,7 @@ class BrowserCollectorOptions(StrictModel):
     decimal_separator: Literal["none", "dot", "comma"]
     wait_timeout_seconds: int = Field(default=15, ge=1, le=60)
     page_load_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    actions: list[BrowserAction] = Field(default_factory=list, max_length=10)
 
     @field_validator("allowed_hosts")
     @classmethod
@@ -55,3 +91,9 @@ class BrowserCollectorOptions(StrictModel):
         if len(normalized) != len(set(normalized)):
             raise ValueError("allowed hosts must be unique")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_action_timeout_budget(self) -> Self:
+        if sum(action.timeout_seconds for action in self.actions) > 60:
+            raise ValueError("total action timeout must not exceed 60 seconds")
+        return self

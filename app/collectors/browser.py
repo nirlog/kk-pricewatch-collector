@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from selenium.common.exceptions import (
     InvalidSelectorException,
     InvalidSessionIdException,
+    NoSuchDriverException,
     NoSuchElementException,
     NoSuchWindowException,
     StaleElementReferenceException,
@@ -17,6 +18,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from app.browser.chrome import WebDriver
+from app.collectors.actions import (
+    ActionConfigurationError,
+    BrowserActionExecutor,
+    RequiredActionError,
+)
 from app.collectors.options import BrowserCollectorOptions
 from app.collectors.price import PriceParseError, parse_price
 from app.collectors.url_policy import DnsResolver, UnsafeUrlError, UrlPolicy, system_dns_resolver
@@ -46,9 +52,11 @@ class BrowserCollector:
         self,
         session_factory: SessionFactory,
         resolver: DnsResolver = system_dns_resolver,
+        action_executor: BrowserActionExecutor | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._resolver = resolver
+        self._action_executor = action_executor or BrowserActionExecutor()
 
     def collect(self, request: CollectorRequest) -> CollectorResponse:
         try:
@@ -104,17 +112,34 @@ class BrowserCollector:
 
         try:
             driver.get(url)
-        except (InvalidSessionIdException, NoSuchWindowException):
+        except (InvalidSessionIdException, NoSuchDriverException, NoSuchWindowException):
             raise
         except (TimeoutException, WebDriverException):
             return self._item_error(item_id, "PAGE_LOAD_FAILED", "Page could not be loaded.")
 
         try:
             policy.validate_after_navigation(driver.current_url)
-        except (InvalidSessionIdException, NoSuchWindowException):
+        except (InvalidSessionIdException, NoSuchDriverException, NoSuchWindowException):
             raise
         except WebDriverException:
             return self._item_error(item_id, "PAGE_LOAD_FAILED", "Page could not be loaded.")
+        except UnsafeUrlError:
+            return self._item_error(item_id, "INVALID_URL", "Redirect URL is not allowed.")
+
+        try:
+            self._action_executor.execute(
+                driver,
+                options.actions,
+                lambda: policy.validate_after_navigation(driver.current_url),
+            )
+        except ActionConfigurationError:
+            return _InvalidSelector()
+        except RequiredActionError:
+            return self._item_error(
+                item_id,
+                "ACTION_FAILED",
+                "Required browser action could not be completed.",
+            )
         except UnsafeUrlError:
             return self._item_error(item_id, "INVALID_URL", "Redirect URL is not allowed.")
 
@@ -143,7 +168,7 @@ class BrowserCollector:
             )
         except InvalidSelectorException:
             return _InvalidSelector()
-        except (InvalidSessionIdException, NoSuchWindowException):
+        except (InvalidSessionIdException, NoSuchDriverException, NoSuchWindowException):
             raise
         except TimeoutException:
             return self._item_error(item_id, "PRICE_NOT_FOUND", "Price was not found.")
