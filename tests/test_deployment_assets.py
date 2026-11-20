@@ -13,6 +13,9 @@ def test_expected_windows_deployment_assets_exist() -> None:
         "Install-CaddyService.ps1",
         "Uninstall-CaddyService.ps1",
         "CollectorRuntime.psm1",
+        "BrowserRuntime.psm1",
+        "Repair-BrowserRuntime.ps1",
+        "Test-BrowserMaintenance.ps1",
         "Test-CollectorRuntime.ps1",
         "Test-BrowserRuntime.ps1",
         "templates/collector-service.xml",
@@ -153,13 +156,68 @@ def test_browser_runtime_service_configuration_is_secure_and_explicit() -> None:
 
 def test_browser_smoke_delegates_to_production_python_runtime() -> None:
     smoke = (WINDOWS_DEPLOYMENT / "Test-BrowserRuntime.ps1").read_text(encoding="utf-8")
-    assert "-m app.browser.smoke" in smoke
-    assert "selenium.webdriver" not in smoke
+    runtime = (WINDOWS_DEPLOYMENT / "BrowserRuntime.psm1").read_text(encoding="utf-8")
+    assert "-m app.browser.smoke" in runtime
+    assert "selenium.webdriver" not in smoke + runtime
     assert "[ValidateSet('ProvisionDriver', 'Offline')]" in smoke
-    assert "$env:SE_AVOID_BROWSER_DOWNLOAD = 'true'" in smoke
-    assert "$env:SE_AVOID_STATS = 'true'" in smoke
-    assert "Remove-Item Env:SE_OFFLINE" in smoke
-    assert "$env:SE_OFFLINE = 'true'" in smoke
+    assert "$env:SE_AVOID_BROWSER_DOWNLOAD = 'true'" in runtime
+    assert "$env:SE_AVOID_STATS = 'true'" in runtime
+    assert "Remove-Item Env:SE_OFFLINE" in runtime
+    assert "$env:SE_OFFLINE = 'true'" in runtime
+
+
+def test_update_requires_explicit_browser_repair_and_verifies_before_start() -> None:
+    updater = (WINDOWS_DEPLOYMENT / "Update-Collector.ps1").read_text(encoding="utf-8")
+    verify = updater.index("Invoke-BrowserRuntimeMaintenance")
+    start = updater.index("& $serviceExe start", verify)
+    assert "[switch] $RepairBrowserRuntime" in updater
+    assert "-Repair:$RepairBrowserRuntime" in updater
+    assert verify < start
+    assert "Remove-OrphanedBrowserProfiles" in updater
+    assert "Wait-ServiceStopped" in updater
+    assert updater.index("Wait-ServiceStopped") < updater.index(
+        "Remove-OrphanedBrowserProfiles",
+        updater.index("try {", updater.index("& $serviceExe stop")),
+    )
+
+
+def test_update_rollback_restores_service_without_legacy_browser_smoke() -> None:
+    updater = (WINDOWS_DEPLOYMENT / "Update-Collector.ps1").read_text(encoding="utf-8")
+    rollback = (WINDOWS_DEPLOYMENT / "UpdateRollback.psm1").read_text(encoding="utf-8")
+    regression = (WINDOWS_DEPLOYMENT / "Test-UpdateRollback.ps1").read_text(encoding="utf-8")
+    assert "Invoke-CollectorUpdateRollback" in updater
+    assert "StartPreviousService" in rollback
+    assert "WaitForPreviousHealth" in rollback
+    assert "Invoke-BrowserRuntimeMaintenance" not in rollback
+    assert "app.browser.smoke" not in rollback
+    assert "start-previous" in regression
+    assert "health-previous" in regression
+    assert "simulated browser cleanup failure" in regression
+    assert "incorrectly report update success" in regression
+
+
+def test_task_006_documents_service_first_rollback_contract() -> None:
+    task = Path("docs/tasks/006-browser-runtime-hardening.md").read_text(encoding="utf-8")
+    assert "starts the previous service, and verifies `/health`" in task
+    assert "does not invoke browser verification from the previous checkout" in task
+    assert "original target update failure remains authoritative" in task
+    assert "Rollback never provisions a driver" in task
+    assert "verifies the browser offline before restarting" not in task
+    assert "successful update or rollback" not in task
+
+
+def test_runtime_cleanup_is_narrowly_scoped() -> None:
+    runtime = (WINDOWS_DEPLOYMENT / "BrowserRuntime.psm1").read_text(encoding="utf-8")
+    assert "Get-ChildItem -LiteralPath $browserRoot -Directory" in runtime
+    assert "$child.Name -notmatch '^chrome-[^" in runtime
+    assert "ReparsePoint" in runtime
+    assert "Remove-Item -LiteralPath $child.FullName" in runtime
+    assert "Remove-Item -LiteralPath $browserRoot" not in runtime
+
+
+def test_version_is_0_5_1() -> None:
+    configuration = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert configuration["project"]["version"] == "0.5.1"
 
 
 def test_installer_provisions_then_verifies_offline_before_service_registration() -> None:
